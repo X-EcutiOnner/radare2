@@ -921,11 +921,43 @@ EXPECT=<<EOF
 EOF
 RUN
 
+NAME=rabin2 -D swift TODO
+FILE=--
+CMDS=!rabin2 -D swift  's9Alamofire10HTTPMethodO8rawValueACSgSS_tcfC'
+EXPECT=<<EOF
+Alamofire.HTTPMethod.rawValue.SgSS_tcfC
+EOF
+RUN
+
+NAME=rabin2 -D swift deinit
+FILE=--
+CMDS=!rabin2 -D swift  's16IOSSecuritySuiteAACfD'
+EXPECT=<<EOF
+IOSSecuritySuite...deinit.deallocating
+EOF
+RUN
+
+NAME=rabin2 -D swift conforms
+FILE=--
+CMDS=!rabin2 -D swift  '_$s16IOSSecuritySuite11FailedCheckOSQAAMc'
+EXPECT=<<EOF
+IOSSecuritySuite.FailedCheck.conformsto.Equatable
+EOF
+RUN
+
 NAME=rabin2 -D swift
-FILE=bins/elf/libc.so.0
+FILE=--
 CMDS=!rabin2 -D swift  _TFSSCfT21_builtinStringLiteralBp8byteSizeBw7isASCIIBi1__SS
 EXPECT=<<EOF
 Swift.String.init(_builtinStringLiteral: Builtin.RawPointer, byteSize: Builtin.Word, isASCII: Builtin.Int1) -> Swift.String
+EOF
+RUN
+
+NAME=rabin2 -D swift O attribute
+FILE=--
+CMDS=!rabin2 -D swift '_$s16IOSSecuritySuite11FailedCheckO13symbolicLinksyA2CmFWC'
+EXPECT=<<EOF
+IOSSecuritySuite.FailedCheck.symbolicLinks
 EOF
 RUN
 

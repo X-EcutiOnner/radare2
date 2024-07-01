@@ -297,8 +297,9 @@ static char *riscv_disassemble(RArchSession *s, ut64 addr, const ut8 *buf, int l
 	if (len < 2) {
 		return NULL;
 	}
-	insn_t word = {0};
-	memcpy (&word, buf, R_MIN (sizeof (word), len));
+	ut8 word_bytes[8] = {0};
+	memcpy (word_bytes, buf, R_MIN (8, len));
+	insn_t word = r_read_le64 (word_bytes);
 	int xlen = s->config->bits;
 	int ilen = riscv_insn_length (word);
 	if (len < ilen) {
@@ -978,13 +979,13 @@ static char *get_reg_profile(RArchSession *s) {
 
 static int info(RArchSession *s, ut32 q) {
 	switch (q) {
-	case R_ANAL_ARCHINFO_ALIGN:
+	case R_ARCH_INFO_CODE_ALIGN:
 		return 2;
-	case R_ANAL_ARCHINFO_MAX_OP_SIZE:
+	case R_ARCH_INFO_MAXOP_SIZE:
 		return 4;
-	case R_ANAL_ARCHINFO_INV_OP_SIZE:
+	case R_ARCH_INFO_INVOP_SIZE:
 		return 2;
-	case R_ANAL_ARCHINFO_MIN_OP_SIZE:
+	case R_ARCH_INFO_MINOP_SIZE:
 		return 2;
 	}
 	return 0;

@@ -1,6 +1,7 @@
 /* radare - LGPL - Copyright 2008-2024 - nibble, pancake, alvaro_fe */
 
 // R2R db/formats/elf/versioninfo
+// R2R db/formats/elf/reloc
 #define R_LOG_ORIGIN "elf"
 #include <r_types.h>
 #include <r_util.h>
@@ -196,7 +197,11 @@ ut64 Elf_(get_phnum)(ELFOBJ *eo) {
 			if (r != sizeof (shdr)) {
 				return 0;
 			}
-			ut64 num = shdr.sh_info;
+#if R_BIN_ELF64
+			ut64 num = r_read_ble64 (&shdr.sh_info, eo->endian);
+#else
+			ut64 num = (ut64)r_read_ble32 (&shdr.sh_info, eo->endian);
+#endif
 			if ((int) num < 1) {
 				return UT16_MAX;
 			}
@@ -1608,10 +1613,6 @@ static ut64 get_got_entry(ELFOBJ *eo, RBinElfReloc *rel) {
 	return (!addr || addr == R_BIN_ELF_WORD_MAX) ? UT64_MAX : addr;
 }
 
-static bool is_thumb_symbol(ut64 plt_addr) {
-	return plt_addr & 1;
-}
-
 static ut64 get_import_addr_qdsp6(ELFOBJ *eo, RBinElfReloc *rel) {
 	ut64 got_addr = eo->dyn_info.dt_pltgot;
 	if (got_addr == R_BIN_ELF_ADDR_MAX) {
@@ -1648,10 +1649,31 @@ static ut64 get_import_addr_arm(ELFOBJ *eo, RBinElfReloc *rel) {
 	switch (rel->type) {
 	case R_ARM_JUMP_SLOT:
 		plt_addr += pos * 12 + 20;
-		if (is_thumb_symbol (plt_addr)) {
+		if (plt_addr & 1) {
 			plt_addr--;
 		}
 		return plt_addr;
+	default:
+		R_LOG_WARN ("Unsupported relocation type for imports %d", rel->type);
+		return UT64_MAX;
+	}
+	return UT64_MAX;
+}
+
+static ut64 get_import_addr_arm64(ELFOBJ *eo, RBinElfReloc *rel) {
+	ut64 got_addr = eo->dyn_info.dt_pltgot;
+	if (got_addr == R_BIN_ELF_ADDR_MAX) {
+		return UT64_MAX;
+	}
+
+	ut64 plt_addr = get_got_entry (eo, rel);
+	if (plt_addr == UT64_MAX) {
+		return UT64_MAX;
+	}
+
+	const ut64 pos = COMPUTE_PLTGOT_POSITION (rel, got_addr, 0x3);
+
+	switch (rel->type) {
 	case R_AARCH64_RELATIVE:
 		R_LOG_WARN ("Unsupported arm64 relocation type for imports %d", rel->type);
 		return UT64_MAX;
@@ -1752,8 +1774,12 @@ static ut64 get_import_addr_ppc(ELFOBJ *eo, RBinElfReloc *rel) {
 	}
 
 	if (rel->rva < plt_addr) {
-		R_LOG_WARN ("reloc rva lower than plt_addr: 0x%"PFMT64x " < 0x%"PFMT64x, rel->rva, plt_addr);
-		return UT64_MAX;
+		ut64 orva = rel->rva;
+		int delta = plt_addr - rel->rva;
+		orva += (2* delta);
+		// orva += 0xef0;
+		R_LOG_DEBUG ("Massaged pointer below plt from 0x%"PFMT64x" to 0x%"PFMT64x, rel->rva, orva);
+		return orva;
 	}
 
 	ut64 p_plt_addr = Elf_(v2p_new) (eo, plt_addr);
@@ -1770,8 +1796,14 @@ static ut64 get_import_addr_ppc(ELFOBJ *eo, RBinElfReloc *rel) {
 	ut64 pos = COMPUTE_PLTGOT_POSITION (rel, plt_addr, 0x0);
 
 	if (eo->endian) {
+#if 0
+		base += plt_addr;
+		base -= (nrel * 16);
+		base += (pos * 8);
+#else
 		base -= (nrel * 16);
 		base += (pos * 16);
+#endif
 		return base;
 	}
 
@@ -1875,8 +1907,9 @@ static ut64 get_import_addr(ELFOBJ *eo, int sym) {
 	case EM_S390:
 		return get_import_addr_s390x (eo, rel);
 	case EM_ARM:
-	case EM_AARCH64:
 		return get_import_addr_arm (eo, rel);
+	case EM_AARCH64:
+		return get_import_addr_arm64 (eo, rel);
 	case EM_MIPS: // MIPS32 BIG ENDIAN relocs
 		return get_import_addr_mips (eo, rel);
 	case EM_QDSP6: // also known as HEXAGON
@@ -2123,7 +2156,14 @@ ut64 Elf_(get_main_offset)(ELFOBJ *eo) {
 			delta = 0x30;
 		}
 		if (delta) {
-			ut64 pa = Elf_(v2p) (eo, r_read_le32 (&buf[delta - 1]) & ~1);
+			ut64 pa = r_read_le32 (&buf[delta - 1]);
+			bool thumb = pa & 1;
+			if (thumb) {
+				pa = Elf_(v2p) (eo, pa & ~1);
+				pa++;
+			} else {
+				pa = Elf_(v2p) (eo, pa);
+			}
 			if (pa < r_buf_size (eo->b)) {
 				return pa;
 			}
@@ -2826,8 +2866,7 @@ static inline bool needle(ELFOBJ *eo, const char *s) {
 	return false;
 }
 
-// TODO: must return const char * all those strings must be const char os[LINUX] or so
-char* Elf_(get_osabi_name)(ELFOBJ *eo) {
+static char* guess_osabi_name(ELFOBJ *eo) {
 	switch (eo->ehdr.e_ident[EI_OSABI]) {
 	case ELFOSABI_LINUX: return strdup ("linux");
 	case ELFOSABI_SOLARIS: return strdup ("solaris");
@@ -2867,7 +2906,26 @@ char* Elf_(get_osabi_name)(ELFOBJ *eo) {
 	if (needle (eo, "GNU")) {
 		return strdup ("linux");
 	}
+	// if a lib is "liblog.so", lets assume android again.
+	RBinElfLib *it;
+	const RVector *libs = Elf_(load_libs)(eo);
+	if (libs) {
+		r_vector_foreach (libs, it) {
+			if (!strcmp (it->name, "liblog.so")) {
+				return strdup ("android");
+			}
+		}
+	}
 	return strdup ("linux");
+}
+
+// TODO: make it const char *
+char* Elf_(get_osabi_name)(ELFOBJ *eo) {
+	if (eo->osabi) {
+		return strdup (eo->osabi);
+	}
+	eo->osabi = guess_osabi_name (eo);
+	return strdup (eo->osabi);
 }
 
 typedef struct reg_offset_state {
@@ -3167,22 +3225,25 @@ static size_t populate_relocs_record_from_dynamic(ELFOBJ *eo, size_t pos, size_t
 static size_t get_next_not_analysed_offset(ELFOBJ *eo, size_t section_vaddr, size_t offset) {
 	size_t gvaddr = section_vaddr + offset;
 
-	if (eo->dyn_info.dt_rela != R_BIN_ELF_ADDR_MAX && eo->dyn_info.dt_rela <= gvaddr
+	if (eo->dyn_info.dt_rela != R_BIN_ELF_ADDR_MAX \
+		&& gvaddr >= eo->dyn_info.dt_rela \
 		&& gvaddr < eo->dyn_info.dt_rela + eo->dyn_info.dt_relasz) {
 		return eo->dyn_info.dt_rela + eo->dyn_info.dt_relasz - section_vaddr;
 	}
 
-	if (eo->dyn_info.dt_rel != R_BIN_ELF_ADDR_MAX && eo->dyn_info.dt_rel <= gvaddr
+	if (eo->dyn_info.dt_rel != R_BIN_ELF_ADDR_MAX \
+		&& gvaddr >= eo->dyn_info.dt_rel \
 		&& gvaddr < eo->dyn_info.dt_rel + eo->dyn_info.dt_relsz) {
 		return eo->dyn_info.dt_rel + eo->dyn_info.dt_relsz - section_vaddr;
 	}
 
-	if (eo->dyn_info.dt_jmprel != R_BIN_ELF_ADDR_MAX && eo->dyn_info.dt_jmprel <= gvaddr
+	if (eo->dyn_info.dt_jmprel != R_BIN_ELF_ADDR_MAX \
+		&& gvaddr >= eo->dyn_info.dt_jmprel \
 		&& gvaddr < eo->dyn_info.dt_jmprel + eo->dyn_info.dt_pltrelsz) {
 		return eo->dyn_info.dt_jmprel + eo->dyn_info.dt_pltrelsz - section_vaddr;
 	}
 
-	return offset;
+	return offset; // UT64_MAX;
 }
 
 static size_t populate_relocs_record_from_section(ELFOBJ *eo, size_t pos, size_t num_relocs) {
@@ -3194,15 +3255,21 @@ static size_t populate_relocs_record_from_section(ELFOBJ *eo, size_t pos, size_t
 	RBinElfSection *section;
 	r_vector_foreach (&eo->g_sections, section) {
 		Elf_(Xword) rel_mode = get_section_mode (eo, i);
-		if (!is_reloc_section (rel_mode) || section->size > eo->size || section->offset > eo->size) {
+		if (!is_reloc_section (rel_mode)) {
+			i++;
+			continue;
+		}
+		if (section->size > eo->size || section->offset > eo->size) {
 			i++;
 			continue;
 		}
 
 		size_t size = get_size_rel_mode (rel_mode);
-		size_t j;
+		ut64 dim_relocs = section->size / size;
+		dim_relocs = R_MIN (dim_relocs, num_relocs) + 2;
+		ut64 j;
 		for (j = get_next_not_analysed_offset (eo, section->rva, 0);
-			j < section->size && pos < num_relocs;
+			j < section->size && pos <= dim_relocs;
 			j = get_next_not_analysed_offset (eo, section->rva, j + size)) {
 
 			RBinElfReloc *reloc = r_vector_end (&eo->g_relocs);
@@ -4845,6 +4912,7 @@ void Elf_(free)(ELFOBJ* eo) {
 	if (!eo) {
 		return;
 	}
+	free (eo->osabi);
 	free (eo->phdr);
 	free (eo->shdr);
 	free (eo->strtab);
@@ -5190,6 +5258,7 @@ static bool is_important(RBinElfReloc *reloc) {
 	switch (reloc->type) {
 	case 21:
 	case 22:
+	case 28: // R_ARM_CALL
 	case 1026:
 		return true;
 	}

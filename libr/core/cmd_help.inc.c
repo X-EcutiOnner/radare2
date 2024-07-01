@@ -204,6 +204,7 @@ static RCoreHelpMessage help_msg_root = {
 	"/", "[?]", "search for bytes, regexps, patterns, ..",
 	"!", "[?] [cmd]", "run given command as in system(3)",
 	"#", "[?] !lang [..]", "Hashbang to run an rlang script",
+	"{", "[?] ...}", "run a command using the json syntax for r2pipe2",
 	"a", "[?]", "analysis commands",
 	"b", "[?]", "display or change the block size",
 	"c", "[?] [arg]", "compare block with given data",
@@ -288,6 +289,7 @@ static RCoreHelpMessage help_msg_question = {
 	"?b", " [num]", "show binary value of number",
 	"?b64[-]", " [str]", "encode/decode in base64",
 	"?btw", " num|expr num|expr num|expr", "returns boolean value of a <= b <= c",
+	"?d", " [num]", "disasssemble given number as a little and big endian dword",
 	"?e", "[=bdgnpst] arg", "echo messages, bars, pie charts and more (see ?e? for details)",
 	"?f", " [num] [str]", "map each bit of the number as flag string index",
 	"?F", "", "flush cons output",
@@ -719,7 +721,38 @@ static int cmd_help(void *data, const char *input) {
 		r_core_cmd_help (core, help_msg_single_quote);
 		break;
 	case 'a': // "?a"
+#if R2_USE_NEW_ABI
+		if (input[1] == 'e') {
+			r_cons_printf ("%s", r_str_chartable ('e'));
+		} else {
+			r_cons_printf ("%s", r_str_chartable (0));
+		}
+#else
 		r_cons_printf ("%s", r_str_asciitable ());
+#endif
+		break;
+	case 'd':
+		{
+			RAnalOp aop = {0};
+			ut8 data[32];
+			ut64 n = r_num_math (core->num, input + 1);
+			r_write_le32 (data, n);
+			int res = r_anal_op (core->anal, &aop, core->offset, data, sizeof (data), R_ARCH_OP_MASK_DISASM);
+			if (res > 0) {
+				r_cons_printf ("bedec   %s\n", aop.mnemonic);
+			} else {
+				r_cons_printf ("bedec   invalid\n");
+			}
+			r_anal_op_fini (&aop);
+			r_write_be32 (data, n);
+			res = r_anal_op (core->anal, &aop, core->offset, data, sizeof (data), R_ARCH_OP_MASK_DISASM);
+			if (res > 0) {
+				r_cons_printf ("ledec   %s\n", aop.mnemonic);
+			} else {
+				r_cons_printf ("ledec   invalid\n");
+			}
+			r_anal_op_fini (&aop);
+		}
 		break;
 	case 'b': // "?b"
 		if (input[1] == '6' && input[2] == '4') {
@@ -789,7 +822,7 @@ static int cmd_help(void *data, const char *input) {
 		}
 		break;
 	case 'o': // "?o"
-		n = r_num_math (core->num, input+1);
+		n = r_num_math (core->num, input + 1);
 		r_cons_printf ("0%"PFMT64o"\n", n);
 		break;
 	case 'T': // "?T"
@@ -1022,7 +1055,7 @@ static int cmd_help(void *data, const char *input) {
 			}
 		} else {
 			if (input[1]) { // ?=
-				r_num_math (core->num, input+1);
+				r_num_math (core->num, input + 1);
 			} else {
 				r_cons_printf ("0x%"PFMT64x"\n", core->num->value);
 			}
@@ -1124,7 +1157,7 @@ static int cmd_help(void *data, const char *input) {
 			break;
 		case 'j': // "?Vj"
 			{
-				PJ *pj = pj_new ();
+				PJ *pj = r_core_pj_new (core);
 				pj_o (pj);
 				pj_ks (pj, "arch", R_SYS_ARCH);
 				pj_ks (pj, "os", R_SYS_OS);
@@ -1370,7 +1403,7 @@ static int cmd_help(void *data, const char *input) {
 			  }
 			break;
 		case ' ': {
-			const char *msg = r_str_trim_head_ro (input+1);
+			const char *msg = r_str_trim_head_ro (input + 1);
 			// TODO: replace all ${flagname} by its value in hexa
 			char *newmsg = filterFlags (core, msg);
 			r_str_unescape (newmsg);
@@ -1440,7 +1473,7 @@ static int cmd_help(void *data, const char *input) {
 		}
 		break;
 	case '_': // "?_" hud input
-		r_core_yank_hud_file (core, input+1);
+		r_core_yank_hud_file (core, input + 1);
 		break;
 	case 'i': // "?i" input num
 		r_cons_set_raw(0);
@@ -1555,5 +1588,62 @@ static int cmd_help(void *data, const char *input) {
 		break;
 	}
 	return 0;
+}
+
+static RCoreHelpMessage help_msg_h = {
+	"help", "", "Show a friendly message",
+	"head", " [n] [file]", "Print first n lines in file (default n=5)",
+	NULL
+};
+
+static int cmd_head(void *data, const char *_input) { // "head"
+	RCore *core = (RCore *)data;
+	int lines = 5;
+	char *input = strdup (_input);
+	char *arg = strchr (input, ' ');
+	char *tmp, *count;
+	if (arg) {
+		arg = (char *)r_str_trim_head_ro (arg + 1); // contains "count filename"
+		count = strchr (arg, ' ');
+		if (count) {
+			*count = 0;	// split the count and file name
+			tmp = (char *)r_str_trim_head_ro (count + 1);
+			lines = atoi (arg);
+			arg = tmp;
+		}
+	}
+	switch (*input) {
+	case '?': // "head?"
+		r_core_cmd_help (core, help_msg_h);
+		break;
+	default: // "head"
+		if (!arg) {
+			arg = "";
+		}
+		if (r_fs_check (core->fs, arg)) {
+			r_core_cmdf (core, "md %s", arg);
+		} else {
+			char *res = r_syscmd_head (arg, lines);
+			if (res) {
+				r_cons_print (res);
+				free (res);
+			}
+		}
+		break;
+	}
+	free (input);
+	return 0;
+}
+
+static int cmd_h(void *data, const char *_input) { // "head"
+	if (r_str_startswith (_input, "ead")) {
+		return cmd_head (data, _input);
+	}
+	if (r_str_startswith (_input, "elp")) {
+		r_cons_printf ("%s\n", help_message);
+		return 0;
+	}
+	r_core_cmd_help ((RCore*)data, help_msg_h);
+	return -1; // invalid command
 }
 #endif

@@ -103,6 +103,7 @@ static RCoreHelpMessage help_msg_pc = {
 	"pcV", "", "V (vlang.io)",
 	"pcw", "", "C words (4 byte)",
 	"pcy", "", "yara",
+	"pcY", "", "quiet yara",
 	"pcz", "", "Swift",
 	NULL
 };
@@ -237,6 +238,14 @@ static RCoreHelpMessage help_msg_pxu = {
 	NULL
 };
 
+static RCoreHelpMessage help_msg_prc = {
+	"Usage:", "prc=[#] ([size]) ", "see p=? to find valid values for #",
+	"prc", "", "print bytes as colors in palette",
+	"prcb", "", "print nibble bits as colors in palette",
+	"prcn", "", "print nibbles as colors in palette",
+	"prc=e", "", "entropy",
+	NULL
+};
 static RCoreHelpMessage help_msg_p_equal = {
 	"Usage:", "p=[=bep?][qj] [N] ([len]) ([offset]) ", "show entropy/printable chars/chars bars",
 	"e ", "zoom.in", "specify range for zoom",
@@ -305,7 +314,8 @@ static RCoreHelpMessage help_msg_pd = {
 	"pdR", "", "recursive disassemble block size bytes without analyzing functions",
 	"pds", "[?]", "print disasm summary, showing referenced names",
 	"pdsb", " [N]", "basic block summary",
-	"pdsf", "[q]", "show function summary of strings, calls, variables, references..",
+	"pdsf", "[sjq]", "show function summary of strings, calls, variables, references..",
+	"pdss", " [N]", "string summary in current function",
 	"pdu", "[aceios?]", "disassemble instructions until condition",
 	"pd,", " [n] [query]", "disassemble N instructions in a table (see dtd for debug traces)",
 	"pdx", " [hex]", "alias for pad or pix",
@@ -326,7 +336,7 @@ static RCoreHelpMessage help_msg_ph = {
 	"ph", " md5", "compute md5 hash of current block",
 	"ph", ":md5", "same as 'ph md5' (colon acts as a space)",
 	"ph", " sha1 32 @ 0x1000", "calculate sha1 of 32 bytes starting at 0x1000",
-	"ph", "", "list available hash plugins",
+	"ph", "", "list available hash plugins (same as Lh and phl/phL)",
 	"phj", "", "list available hash plugins in json",
 	NULL
 };
@@ -591,13 +601,13 @@ static RCoreHelpMessage help_msg_pz = {
 	"e ", "zoom.from", "start address",
 	"e ", "zoom.to", "end address",
 	"e ", "zoom.byte", "specify how to calculate each byte",
-	"pzp", "", "number of printable chars",
-	"pzf", "", "count of flags in block",
-	"pzs", "", "strings in range",
 	"pz0", "", "number of bytes with value '0'",
 	"pzF", "", "number of bytes with value 0xFF",
 	"pze", "", "calculate entropy and expand to 0-255 range",
+	"pzf", "", "count of flags in block",
 	"pzh", "", "head (first byte value); This is the default mode",
+	"pzp", "", "number of printable chars",
+	"pzs", "", "strings in range",
 	// "WARNING: On big files, use 'zoom.byte=h' or restrict ranges\n");
 	NULL
 };
@@ -629,6 +639,45 @@ static RCoreHelpMessage help_msg_pg = {
 	"pg", "*", "print the gadgets as r2 commands",
 	"pg-", "*", "remove all the gadgets",
 	NULL
+};
+
+static const ut32 colormap16[16] = {
+#if 0
+	// rainbow from r2ai
+	0x303030,
+	0xffff00,
+	0x00ff00,
+	0x00ff00,
+	0x00ffff,
+	0x0000ff,
+	0x8a2be2,
+	0x4b0082,
+	0x800080,
+	0xff00ff,
+	0xff69b4,
+	0xfa8072,
+	0xffdab9,
+	0xffd700,
+	0xc0c0c0,
+	0xff0000,
+#else
+	0xe71d43, // Dark Red
+	0xff0000, // Red
+	0xff6e00, // Orange
+	0xffc300, // Orange Yellow
+	0xffff00, // Yellow
+	0xaad500, // Lime
+	0x55aa00, // Grass Green
+	0x008000, // Forest Green
+	0x005555, // Dark Teal
+	0x002baa, // Navy
+	0x0000ff, // Blue
+	0x3200ac, // Purple
+	0x4b0082, // Magenta
+	0x812ba6, // Dark Pink
+	0xb857ca, // Light Pink
+	0xd03a87, // Salmon
+#endif
 };
 
 static const ut32 colormap[256] = {
@@ -677,6 +726,98 @@ static void first_flag_chars(const char *name, char *ch, char *ch2) {
 	const bool two = name[0] && name[1];
 	*ch = two? name[0]: ' ';
 	*ch2 = two? name[1]: name[0]; // two? 1: 0];
+}
+
+// nibble-level colordump
+static char *get_color(ut8 ch) {
+	ut32 c0 = colormap16[ch];
+	const int brightness = ((c0 & 0xff0000) >> 16) + 2 * ((c0 & 0xff00) >> 8) + (c0 & 0xff) / 2;
+	// char *str = r_str_newf ("rgb:%s rgb:%06x", brightness <= 0x7f * 3 ? "fff" : "000", c0);
+	char *str = r_str_newf ("rgb:%s rgb:%06x", brightness <= 0x40 * 3 ? "aaa" : "222", c0);
+	char *res = r_cons_pal_parse (str, NULL);
+	free (str);
+	return res;
+}
+
+static void cmd_prcn(RCore *core, const ut8* block, int len, bool bitsmode) {
+	int i, j;
+	char *color0;
+	char *color1;
+	int cols = r_config_get_i (core->config, "hex.cols");
+	const bool show_color = r_config_get_b (core->config, "scr.color");
+	const bool show_flags = r_config_get_b (core->config, "asm.flags");
+	const bool show_section = r_config_get_b (core->config, "hex.section");
+	const bool show_offset = r_config_get_b (core->config, "hex.offset");
+	// const bool show_cursor = core->print->cur_enabled;
+	const bool show_unalloc = core->print->flags & R_PRINT_FLAGS_UNALLOC;
+	if (cols < 1 || cols > 0xfffff) {
+		cols = 32;
+	}
+	for (i = 0; i < len; i += cols) {
+		if (show_section) {
+			const char * name = r_core_get_section_name (core, core->offset + i);
+			r_cons_printf ("%20s ", r_str_get (name));
+		}
+		if (show_offset) {
+			r_print_addr (core->print, core->offset + i);
+		}
+		for (j = i; j < i + cols; j ++) {
+			if (j >= len) {
+				break;
+			}
+			ut8 ch0 = (block[j] >> 4) & 0xf;
+			ut8 ch1 = block[j] & 0xf;
+			if (show_unalloc && !core->print->iob.is_valid_offset (core->print->iob.io, core->offset + j, false)) {
+				ch0 = core->print->io_unalloc_ch;
+				ch1 = core->print->io_unalloc_ch;
+			}
+			if (show_color) {
+				color0 = get_color (ch0);
+				color1 = get_color (ch1);
+#if 0
+				if (show_cursor && core->print->cur == j) {
+					ch = '_';
+				} else {
+					ch = ' ';
+				}
+#endif
+			} else {
+				color0 = strdup ("");
+				color1 = strdup ("");
+#if 0
+				if (show_cursor && core->print->cur == j) {
+					ch = '_';
+				} else {
+					const int idx = (int)(((double)block[j] / 255) * (strlen (chars) - 1));
+					ch = chars[idx];
+				}
+#endif
+			}
+			if (bitsmode) {
+				char color0bits[8] = {0};
+				char color1bits[8] = {0};
+				ut8 b0 = ch0 | ch0 << 4;
+				ut8 b1 = ch1 | ch1 << 4;
+				r_str_bits (color0bits, &b0, 4, NULL);
+				r_str_bits (color1bits, &b1, 4, NULL);
+				r_cons_printf ("%s%s%s%s"Color_RESET" ", color0, color0bits, color1, color1bits);
+			} else {
+				r_cons_printf ("%s%01x%s%01x"Color_RESET, color0, ch0, color1, ch1);
+			}
+			free (color0);
+			free (color1);
+		}
+		if (show_color) {
+			r_cons_printf (Color_RESET);
+		}
+		if (show_flags) {
+			RFlagItem *fi = r_flag_get_i (core->flags, core->offset + j);
+			if (fi) {
+				r_cons_printf (" ; %s", fi->name);
+			}
+		}
+		r_cons_newline ();
+	}
 }
 
 // colordump
@@ -1243,7 +1384,7 @@ static void cmd_pDj(RCore *core, const char *arg) {
 	if (bsize < 0) {
 		bsize = -bsize;
 	}
-	PJ *pj = pj_new ();
+	PJ *pj = r_core_pj_new (core);
 	if (!pj) {
 		return;
 	}
@@ -1263,7 +1404,7 @@ static void cmd_pDj(RCore *core, const char *arg) {
 
 static void cmd_pdj(RCore *core, const char *arg, ut8* block) {
 	int nblines = r_num_math (core->num, arg);
-	PJ *pj = pj_new ();
+	PJ *pj = r_core_pj_new (core);
 	if (!pj) {
 		return;
 	}
@@ -3058,7 +3199,8 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 	char *ox, *qo, *string = NULL;
 	char *line, *s, *string2 = NULL;
 	char *switchcmp = NULL;
-	int i, count, use_color = r_config_get_i (core->config, "scr.color");
+	int i, count;
+	int use_color = r_config_get_i (core->config, "scr.color");
 	bool show_comments = r_config_get_b (core->config, "asm.comments");
 	bool show_offset = r_config_get_b (core->config, "asm.offset");
 	bool orig_show_offset = show_offset;
@@ -3081,6 +3223,15 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 
 	if (strchr (input, 'q')) { // "pdsfq"
 		show_offset = false;
+	}
+	PJ *pj = NULL;
+	if (strchr (input + 2, 'j')) { // "pdsfj"
+		pj = r_core_pj_new (core);
+		pj_a (pj);
+	}
+	bool pdsfs = false;
+	if (strchr (input + 2, 's')) { // "pdsfs"
+		pdsfs = true;
 	}
 
 	r_cons_push ();
@@ -3174,7 +3325,7 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 				R_FREE (string2);
 			}
 		}
-		if (asm_flags) {
+		if (asm_flags && pj == NULL && !pdsfs) {
 			str = strstr (line, ";-- ");
 			if (str) {
 				if (!r_str_startswith (str + 4, "case")) {
@@ -3182,6 +3333,10 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 				}
 			}
 		}
+		if (pdsfs) {
+			str = strstr (line, " str.");
+
+		} else {
 #define USE_PREFIXES 1
 #if USE_PREFIXES
 		// XXX leak
@@ -3211,6 +3366,7 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 			}
 		}
 #endif
+		}
 		if (str) {
 			char *qoe = NULL;
 			if (!qoe) {
@@ -3236,11 +3392,15 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 			}
 		}
 		R_FREE (string2);
-		_handle_call (core, line, &str);
-		if (!str) {
-			str = strstr (line, "sym.");
+		if (pdsfs) {
+			str = NULL;
+		} else {
+			_handle_call (core, line, &str);
 			if (!str) {
-				str = strstr (line, "fcn.");
+				str = strstr (line, "sym.");
+				if (!str) {
+					str = strstr (line, "fcn.");
+				}
 			}
 		}
 		if (str) {
@@ -3264,21 +3424,21 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 		}
 		if (addr != UT64_MAX) {
 			const char *str = NULL;
-			if (show_comments) {
+			if (show_comments && !pdsfs) {
 				char *comment = r_core_anal_get_comments (core, addr);
-				if (comment) {
-					if (switchcmp) {
-						if (strcmp (comment, switchcmp)) {
+				if (R_STR_ISNOTEMPTY (comment)) {
+					if (!switchcmp || strcmp (comment, switchcmp)) {
+						if (pj) {
+							pj_o (pj);
+							pj_ki (pj, "addr", addr);
+							pj_ks (pj, "comment", comment);
+							pj_end (pj);
+						} else {
 							if (show_offset) {
 								r_cons_printf ("%s0x%08"PFMT64x" ", use_color? pal->offset: "", addr);
 							}
 							r_cons_printf ("%s%s\n", use_color? pal->comment: "", comment);
 						}
-					} else {
-						if (show_offset) {
-							r_cons_printf ("%s0x%08"PFMT64x" ", use_color? pal->offset: "", addr);
-						}
-						r_cons_printf ("%s%s\n", use_color? pal->comment: "", comment);
 					}
 					if (r_str_startswith (comment, "switch table")) {
 						free (switchcmp);
@@ -3288,7 +3448,7 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 				}
 			}
 
-			if (fcn) {
+			if (fcn && !pj) {
 				bool label = false;
 				/* show labels, basic blocks and (conditional) branches */
 				RAnalBlock *bb;
@@ -3324,7 +3484,7 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 					}
 				}
 			}
-			if (string && *string) {
+			if (R_STR_ISNOTEMPTY (string)) {
 				if (string && !strncmp (string, "0x", 2)) {
 					str = string;
 				}
@@ -3349,9 +3509,30 @@ static void disasm_strings(RCore *core, const char *input, RAnalFunction *fcn) {
 					if (string2) {
 						r_str_trim (string2);
 					}
+					if (pdsfs) {
+						if (r_str_startswith (string, "str.")) {
+							char *ns = r_core_cmd_strf (core, "psj @ %s~{string}", string);
+							r_str_trim (ns);
+							ns = r_str_replace_all (ns, "\n", "\\n");
+							ns = r_str_replace_all (ns, "\r", "\\r");
+							ns = r_str_replace_all (ns, "\t", "\\t");
+							free (string);
+							string = ns;
+						}
+					}
 					//// TODO implememnt avoid duplicated strings
 					// eprintf ("---> %s\n", string);
-					if (use_color) {
+					if (pj) {
+						pj_o (pj);
+						pj_ki (pj, "addr", addr);
+						if (flag) {
+							pj_ks (pj, "name", flag->name);
+						}
+						if (R_STR_ISNOTEMPTY (string)) {
+							pj_ks (pj, "text", string);
+						}
+						pj_end (pj);
+					} else if (use_color) {
 						if (show_offset) {
 							r_cons_printf ("%s0x%08"PFMT64x" "Color_RESET, use_color? pal->offset: "", addr);
 						}
@@ -3385,13 +3566,19 @@ restore_conf:
 	r_config_set_b (core->config, "scr.html", scr_html);
 	r_config_set_b (core->config, "asm.emu", asm_emu);
 	r_config_set_b (core->config, "emu.str", emu_str);
+	if (pj) {
+		pj_end (pj);
+		char *s = pj_drain (pj);
+		r_cons_printf ("%s\n", s);
+		free (s);
+	}
 }
 
-static void algolist(int mode) {
+static void algolist(RCore *core, int mode) {
 	int i;
 	PJ *pj = NULL;
 	if (mode == 'j') {
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		pj_a (pj);
 	}
 	for (i = 0; i < R_HASH_NBITS; i++) {
@@ -3420,31 +3607,31 @@ static void algolist(int mode) {
 static bool cmd_print_ph(RCore *core, const char *input) {
 	char algo[128];
 	ut32 osize = 0, len = core->blocksize;
-	const char *ptr;
 	int pos = 0, handled_cmd = false;
 
-	if (*input == '?') {
+	const char i0 = input[0];
+	if (i0 == '?') {
 		r_core_cmd_help (core, help_msg_ph);
 		return true;
 	}
-	if (!*input) {
-		algolist (1);
+	if (!i0 || i0 == 'l' || i0 == 'L') {
+		algolist (core, 1);
 		return true;
 	}
-	if (*input == 'j') {
-		algolist ('j');
+	if (i0 == 'j') {
+		algolist (core, 'j');
 		return true;
 	}
-	if (*input == '=') {
-		algolist (0);
+	if (i0 == '=') {
+		algolist (core, 0);
 		return true;
 	}
-	if (*input == ':') {
+	if (i0 == ':') {
 		input++;
 	}
 	input = r_str_trim_head_ro (input);
-	ptr = strchr (input, ' ');
-	sscanf (input, "%31s", algo);
+	const char *ptr = strchr (input, ' ');
+	r_str_ncpy (algo, input, sizeof (algo) - 1);
 	if (ptr && ptr[1]) { // && r_num_is_valid_input (core->num, ptr + 1)) {
 		int nlen = r_num_math (core->num, ptr + 1);
 		if (nlen > 0) {
@@ -3851,6 +4038,9 @@ static bool cmd_print_blocks(RCore *core, const char *input) {
 	list = r_core_get_boundaries_prot (core, -1, NULL, "search");
 	if (!list) {
 		result = true;
+		if (mode == 'j') {
+			r_cons_println ("{}");
+		}
 		goto cleanup;
 	}
 	RListIter *iter;
@@ -3870,6 +4060,9 @@ static bool cmd_print_blocks(RCore *core, const char *input) {
 	ut64 piece = R_MAX ((to - from) / R_MAX (cols, w), 1);
 	as = r_core_anal_get_stats (core, from, to, piece);
 	if (!as) {
+		if (mode == 'j') {
+			r_cons_println ("{}");
+		}
 		goto cleanup;
 	}
 
@@ -3889,7 +4082,7 @@ static bool cmd_print_blocks(RCore *core, const char *input) {
 #endif
 		goto cleanup;
 	case 'j': // "p-j"
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			goto cleanup;
 		}
@@ -4537,7 +4730,7 @@ static void cmd_print_bars(RCore *core, const char *input) {
 		int i;
 		switch (submode) {
 		case 'j': {
-			PJ *pj = pj_new ();
+			PJ *pj = r_core_pj_new (core);
 			if (!pj) {
 				return;
 			}
@@ -4943,7 +5136,7 @@ static void disasm_recursive(RCore *core, ut64 addr, int count, char type_print)
 	ut8 buf[128];
 	PJ *pj = NULL;
 	if (type_print == 'j') {
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			return;
 		}
@@ -5004,7 +5197,7 @@ static void func_walk_blocks(RCore *core, RAnalFunction *f, char input, char typ
 	}
 	r_list_sort (f->bbs, (RListComparator) bbcmp);
 	if (input == 'j' && b) { // "pdrj"
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			return;
 		}
@@ -5239,7 +5432,7 @@ static void cmd_pxr(RCore *core, int len, int mode, int wordsize, const char *ar
 		r_table_add_column (t, s, "refs", 0);
 	}
 	if (mode == 'j') {
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			return;
 		}
@@ -5481,7 +5674,7 @@ static bool cmd_pi(RCore *core, const char *input, int len, int l, ut8 *block) {
 			// check for bounds
 			if (input[3] != 0) {
 				if (input[3] == 'j') { // "pifcj"
-					pj = pj_new ();
+					pj = r_core_pj_new (core);
 					pj_a (pj);
 				}
 			}
@@ -5614,7 +5807,7 @@ static void core_print_decompile(RCore *core, const char *input) {
 		count = 1;
 	}
 	ut64 addr = core->offset;
-	int minopsize = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
+	int minopsize = r_anal_archinfo (core->anal, R_ARCH_INFO_MINOP_SIZE);
 	const int bits = r_config_get_i (core->config, "asm.bits");
 	REsilC *ec = r_esil_toc_new (core->anal, bits);
 	for (i = 0; i < count; i++) {
@@ -5635,6 +5828,94 @@ static void core_print_decompile(RCore *core, const char *input) {
 		r_anal_op_free (op);
 	}
 	r_esil_toc_free (ec);
+}
+
+static void cmd_print_pxb(RCore *core, int len, const char *input) {
+	const int cols = r_config_get_i (core->config, "hex.cols");
+	ut32 n;
+	ut64 n64;
+	int columns = cols / 4;
+	if (columns % 2) {
+		columns++;
+	}
+	switch (columns) {
+	case 3:
+	case 5:
+		columns = 4;
+		break;
+	case 6:
+	case 7:
+		columns = 8;
+		break;
+	case 1:
+	case 2:
+	case 4:
+	case 8:
+		break;
+	default:
+		if (columns < 1) {
+			columns = 1;
+		} else {
+			columns = 4;
+		}
+		break;
+	}
+	int lastc = columns - 1;
+	int i, c;
+	char buf[32];
+	for (i = c = 0; i < len; i++, c++) {
+		if (c == 0) {
+			ut64 ea = core->offset + i;
+			if (core->print->pava) {
+				ut64 va = r_io_p2v (core->io, ea);
+				if (va != UT64_MAX) {
+					ea = va;
+				}
+			}
+			r_print_section (core->print, ea);
+			r_print_offset (core->print, ea, 0, 0, NULL);
+		}
+		r_str_bits (buf, core->block + i, 8, NULL);
+
+		// split bits
+		memmove (buf + 5, buf + 4, 5);
+		buf[4] = 0;
+		r_print_cursor (core->print, i, 1, 1);
+		if (input[1] == 'B') {
+			r_str_replace_ch (buf, '0', '.', true);
+			r_str_replace_ch (buf + 5, '0', '.', true);
+		}
+		r_cons_printf ("%s_%s  ", buf, buf + 5);
+		r_print_cursor (core->print, i, 1, 0);
+		if (c == lastc) {
+			const ut8 *b = core->block + i - 3;
+			int (*k) (const ut8 *, int) = cmd_pxb_k;
+			char (*p) (char) = cmd_pxb_p;
+			switch (columns) {
+			case 1:
+				n = k (b, 0);
+				r_cons_printf ("0x%02x  %c\n", n, p (b[0]));
+				break;
+			case 2:
+				n = k (b, 0) | k (b, 1);
+				r_cons_printf ("0x%04x  %c%c\n", n, p (b[0]), p (b[1]));
+				break;
+			case 4:
+				n = k (b, 0) | k (b, 1) | k (b, 2) | k (b, 3);
+				r_cons_printf ("0x%08x  %c%c%c%c\n",
+					n, p (b[0]), p (b[1]), p (b[2]), p (b[3]));
+				break;
+			case 8:
+				n64 = k (b, 0) | k (b, 1) | k (b, 2) | k (b, 3)
+				  | k (b, 4) | k (b, 5) | k (b, 6) | k (b, 7);
+				r_cons_printf ("0x%016"PFMT64x"  %c%c%c%c%c%c%c%c\n", n64,
+					p (b[0]), p (b[1]), p (b[2]), p (b[3]),
+					p (b[4]), p (b[5]), p (b[6]), p (b[7]));
+				break;
+			}
+			c = -1;
+		}
+	}
 }
 
 #if 0
@@ -6322,14 +6603,17 @@ static int cmd_print(void *data, const char *input) {
 			break;
 		case 'd': // "pdd" // r2dec
 			R_LOG_ERROR ("Missing plugin. Run: r2pm -ci r2dec");
+			r_core_return_code (core, 1);
 			processed_cmd = true;
 			break;
 		case 'z': // "pdz" // retdec
 			R_LOG_ERROR ("Missing plugin. Run: r2pm -ci r2retdec");
+			r_core_return_code (core, 1);
 			processed_cmd = true;
 			break;
 		case 'g': // "pdg" // r2ghidra
 			R_LOG_ERROR ("Missing plugin. Run: r2pm -ci r2ghidra");
+			r_core_return_code (core, 1);
 			processed_cmd = true;
 			break;
 		case 'c': // "pdc" // "pDc"
@@ -6466,7 +6750,7 @@ static int cmd_print(void *data, const char *input) {
 						r_io_read_at (core->io, b->addr, block, b->size);
 
 						if (input[2] == 'j') {
-							pj = pj_new ();
+							pj = r_core_pj_new (core);
 							if (!pj) {
 								break;
 							}
@@ -6534,7 +6818,7 @@ static int cmd_print(void *data, const char *input) {
 					ut32 fcn_size = r_anal_function_realsize (f);
 					const char *orig_bb_middle = r_config_get (core->config, "asm.bbmiddle");
 					r_config_set_i (core->config, "asm.bbmiddle", false);
-					pj = pj_new ();
+					pj = r_core_pj_new (core);
 					if (!pj) {
 						break;
 					}
@@ -6783,7 +7067,7 @@ static int cmd_print(void *data, const char *input) {
 				char *s = print_analstr (core, core->offset, 128);
 				if (s) {
 					if (input[2] == 'j') {
-						PJ *pj = pj_new ();
+						PJ *pj = r_core_pj_new (core);
 						pj_o (pj);
 						pj_kn (pj, "addr", core->offset);
 						pj_ks (pj, "text", s);
@@ -7182,36 +7466,57 @@ static int cmd_print(void *data, const char *input) {
 	case 'r': // "pr"
 		switch (input[1]) {
 		case 'i': // "pri" // color raw image
-			if (input[2] == '?') {
+			switch (input[2]) {
+			case '?':
 				r_core_cmd_help_match (core, help_msg_pr, "pri");
-			} else if (input[2] == 'n') {
+				break;
+			case 'n':
 				cmd_printmsg (core, input + 4);
-			} else if (input[2] == '1') {
+				break;
+			case '1':
 				bitimage (core, 1);
-			} else if (input[2] == 's') {
-				int cols = r_config_get_i (core->config, "hex.cols");
-				r_cons_image (core->block, core->blocksize, cols, 's');
-			} else {
-				// TODO: do colormap and palette conversions here
-				int mode = r_config_get_i (core->config, "scr.color")? 0: 'a';
-				int cols = r_config_get_i (core->config, "hex.cols");
-				r_cons_image (core->block, core->blocksize, cols, mode);
+				break;
+			case 's':
+				{
+					const int cols = r_config_get_i (core->config, "hex.cols");
+					r_cons_image (core->block, core->blocksize, cols, 's');
+				}
+				break;
+			default:
+				{
+					// TODO: do colormap and palette conversions here
+					int mode = r_config_get_i (core->config, "scr.color")? 0: 'a';
+					int cols = r_config_get_i (core->config, "hex.cols");
+					r_cons_image (core->block, core->blocksize, cols, mode);
+					break;
+				}
+				break;
 			}
 			break;
 		case 'c': // "prc" // color raw dump
-			if (input[2] == '?') {
+			switch (input[2]) {
+			case '?':
 				// TODO: change =e to colorized =mode
-				r_cons_printf ("prc=e # colorblocks of entropy\n");
+				R_LOG_INFO ("See pz? and p=?");
 				// TODO: replace pz? help text with "See also"
-				r_core_cmd0 (core, "pz?");
-			} else if (input[2] == '=') {
+				r_core_cmd_help (core, help_msg_prc);
+				break;
+			case '=':
 				if (input[3] == '?') {
 					r_core_cmd_help (core, help_msg_p_equal);
 				} else {
 					cmd_prc_zoom (core, input + 2);
 				}
-			} else {
+				break;
+			case 'b':
+				cmd_prcn (core, block, len, true);
+				break;
+			case 'n':
+				cmd_prcn (core, block, len, false);
+				break;
+			default:
 				cmd_prc (core, block, len);
+				break;
 			}
 			break;
 		case '?':
@@ -7467,44 +7772,7 @@ static int cmd_print(void *data, const char *input) {
 		case 'b': // "pxb"
 		case 'B': // "pxB"
 			if (l) {
-				ut32 n;
-				int i, c;
-				char buf[32];
-				for (i = c = 0; i < len; i++, c++) {
-					if (c == 0) {
-						ut64 ea = core->offset + i;
-						if (core->print->pava) {
-							ut64 va = r_io_p2v (core->io, ea);
-							if (va != UT64_MAX) {
-								ea = va;
-							}
-						}
-						r_print_section (core->print, ea);
-						r_print_offset (core->print, ea, 0, 0, NULL);
-					}
-					r_str_bits (buf, core->block + i, 8, NULL);
-
-					// split bits
-					memmove (buf + 5, buf + 4, 5);
-					buf[4] = 0;
-					r_print_cursor (core->print, i, 1, 1);
-					if (input[1] == 'B') {
-						r_str_replace_ch (buf, '0', '.', true);
-						r_str_replace_ch (buf + 5, '0', '.', true);
-					}
-					r_cons_printf ("%s_%s  ", buf, buf + 5);
-					r_print_cursor (core->print, i, 1, 0);
-					if (c == 3) {
-						const ut8 *b = core->block + i - 3;
-						int (*k) (const ut8 *, int) = cmd_pxb_k;
-						char (*p) (char) = cmd_pxb_p;
-
-						n = k (b, 0) | k (b, 1) | k (b, 2) | k (b, 3);
-						r_cons_printf ("0x%08x  %c%c%c%c\n",
-							n, p (b[0]), p (b[1]), p (b[2]), p (b[3]));
-						c = -1;
-					}
-				}
+				cmd_print_pxb (core, len, input);
 			}
 			break;
 		case 'c': // "pxc"

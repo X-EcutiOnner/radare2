@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2015-2023 - mrmacete, pancake */
+/* radare2 - LGPL - Copyright 2015-2024 - mrmacete, pancake */
 
 #include <r_arch.h>
 #include <r_anal/op.h>
@@ -1173,16 +1173,19 @@ static char *regs(RArchSession *as) {
 
 static int archinfo(RArchSession *as, ut32 q) {
 	switch (q) {
-	case R_ANAL_ARCHINFO_MIN_OP_SIZE:
+	case R_ARCH_INFO_MINOP_SIZE:
 		return 8;
-	case R_ANAL_ARCHINFO_MAX_OP_SIZE:
+	case R_ARCH_INFO_MAXOP_SIZE:
 		return 8;
-	case R_ANAL_ARCHINFO_INV_OP_SIZE:
+	case R_ARCH_INFO_INVOP_SIZE:
 		return 8;
-	case R_ANAL_ARCHINFO_ALIGN:
+	case R_ARCH_INFO_CODE_ALIGN:
 		return 8;
-	case R_ANAL_ARCHINFO_DATA_ALIGN:
+	case R_ARCH_INFO_DATA_ALIGN:
 		return 1;
+	case R_ARCH_INFO_ISVM:
+		// dont run aav in aaa
+		return R_ARCH_INFO_ISVM;
 	}
 	return 0;
 }
@@ -1225,6 +1228,7 @@ const RArchPlugin r_arch_plugin_bpf = {
 		.name = "bpf.mr",
 		.desc = "Classic BPF analysis plugin",
 		.license = "LGPLv3",
+		.author = "mrmacete"
 	},
 	.arch = "bpf",
 	.bits = 32,

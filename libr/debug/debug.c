@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2023 - pancake, jduck, TheLemonMan, saucec0de */
+/* radare - LGPL - Copyright 2009-2024 - pancake, jduck, TheLemonMan, saucec0de */
 
 #include <r_debug.h>
 #include <r_drx.h>
@@ -64,10 +64,13 @@ static bool r_debug_bp_hit(RDebug *dbg, RRegItem *pc_ri, ut64 pc, RBreakpointIte
 	/* initialize the output parameter */
 	*pb = NULL;
 
+#if 0
 	/* if we are tracing, update the tracing data */
+	// uncommenting this line causes the trace to be dupped
 	if (dbg->trace->enabled) {
 		r_debug_trace_pc (dbg, pc);
 	}
+#endif
 
 	/* remove all sw breakpoints for now. we'll set them back in stage 2
 	 *
@@ -280,7 +283,7 @@ R_API RBreakpointItem *r_debug_bp_add(RDebug *dbg, ut64 addr, int hw, bool watch
 			}
 			r_list_free (list);
 		} else {
-			//module holds the address
+			// module holds the address
 			addr = (ut64)r_num_math (dbg->num, module);
 			if (!addr) {
 				return NULL;

@@ -1,3 +1,5 @@
+/* radare - LGPL - Copyright 2009-2024 - pancake */
+
 #ifndef R2_BIN_H
 #define R2_BIN_H
 
@@ -460,6 +462,9 @@ struct r_bin_t {
 	char strfilter; // string filtering
 	char *strpurge; // purge false positive strings
 	char *srcdir; // dir.source
+#if R2_USE_NEW_ABI
+	char *srcdir_base; // dir.source.base
+#endif
 	char *prefix; // bin.prefix
 	char *strenc;
 	ut64 filter_rules;
@@ -596,8 +601,14 @@ typedef struct r_bin_class_t {
 	int index; // should be unsigned?
 	ut64 addr;
 	char *ns; // namespace // maybe RBinName?
+#if R2_USE_NEW_ABI
+	// Use RVec here
 	RList *methods; // <RBinSymbol>
 	RList *fields; // <RBinField>
+#else
+	RList *methods; // <RBinSymbol>
+	RList *fields; // <RBinField>
+#endif
 	// RList *interfaces; // <char *>
 	RBinAttribute attr;
 	ut64 lang;
@@ -677,7 +688,7 @@ typedef struct r_bin_mem_t {
 	ut64 addr;
 	int size;
 	int perms;
-	RList *mirrors;		//for mirror access; stuff here should only create new maps not new fds
+	RList *mirrors;	//for mirror access; stuff here should only create new maps not new fds
 } RBinMem;
 
 typedef struct r_bin_map_t {
@@ -692,12 +703,17 @@ typedef struct r_bin_dbginfo_t {
 	bool (*get_line)(RBinFile *arch, ut64 addr, char *file, int len, int *line, int *column);
 } RBinDbgInfo;
 
+typedef bool (*RBinWriteAddLib)(RBinFile *bf, const char *lib);
+typedef ut64 (*RBinWriteScnResize)(RBinFile *bf, const char *name, ut64 newsize);
+typedef bool (*RBinWriteScnPerms)(RBinFile *bf, const char *name, int perms);
+typedef bool (*RBinWriteEntry)(RBinFile *bf, ut64 addr);
+typedef int (*RBinWriteRpathDel)(RBinFile *bf);
 typedef struct r_bin_write_t {
-	ut64 (*scn_resize)(RBinFile *bf, const char *name, ut64 size);
-	bool (*scn_perms)(RBinFile *bf, const char *name, int perms);
-	int (*rpath_del)(RBinFile *bf);
-	bool (*entry)(RBinFile *bf, ut64 addr);
-	bool (*addlib)(RBinFile *bf, const char *lib);
+	RBinWriteScnResize scn_resize;
+	RBinWriteScnPerms scn_perms;
+	RBinWriteRpathDel rpath_del;
+	RBinWriteEntry entry;
+	RBinWriteAddLib addlib;
 } RBinWrite;
 
 typedef int (*RBinGetOffset)(RBin *bin, int type, int idx);

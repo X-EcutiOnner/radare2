@@ -1,6 +1,8 @@
-/* radare - LGPL - Copyright 2010-2023 - pancake, rhl */
+/* radare - LGPL - Copyright 2010-2024 - pancake, rhl */
 
 #define PROJECT_EXPERIMENTAL 0
+
+// R2R db/cmd/projects
 
 #include <r_core.h>
 #include <rvc.h>
@@ -110,7 +112,7 @@ R_API int r_core_project_list(RCore *core, int mode) {
 	RList *list = r_sys_dir (path);
 	switch (mode) {
 	case 'j':
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			break;
 		}
@@ -468,7 +470,7 @@ R_API char *r_core_project_name(RCore *core, const char *prjfile) {
 }
 
 #if PROJECT_EXPERIMENTAL
-static int fdc; // TODO: move into a struct passed to the foreach instead of global
+static R_TH_LOCAL int fdc; // TODO: move into a struct passed to the foreach instead of global
 
 static bool store_files_and_maps(RCore *core, RIODesc *desc, ut32 id) {
 	RList *maps = NULL;
@@ -640,11 +642,11 @@ static void r_core_project_zip(RCore *core, const char *prj_dir) {
 }
 
 R_API bool r_core_project_save(RCore *core, const char *prj_name) {
+	r_return_val_if_fail (R_STR_ISNOTEMPTY (prj_name), false);
 	bool scr_null = false;
 	bool ret = true;
 	SdbListIter *it;
 	SdbNs *ns;
-	r_return_val_if_fail (prj_name && *prj_name, false);
 
 	if (r_config_get_b (core->config, "cfg.debug")) {
 		R_LOG_ERROR ("radare2 does not support projects on debugged bins");

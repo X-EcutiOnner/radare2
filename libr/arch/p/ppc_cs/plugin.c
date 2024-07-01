@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2013-2023 - pancake */
+/* radare2 - LGPL - Copyright 2013-2024 - pancake */
 
 #include <r_arch.h>
 #include <r_esil.h>
@@ -249,6 +249,7 @@ static char *regs(RArchSession *as) {
 	const char *p =
 		"=PC	pc\n"
 		"=SP	r1\n"
+		"=BP	r31\n"
 		"=SR	srr1\n" // status register ??
 		"=SN	r0\n" // also for ret
 		"=R0	r3\n" // ret
@@ -523,6 +524,7 @@ static char *shrink(char *op) {
 	return op;
 }
 
+#undef PPC
 #define CSINC PPC
 #if 0
 #define CSINC_MODE \

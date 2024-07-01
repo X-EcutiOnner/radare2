@@ -1484,6 +1484,9 @@ static bool cmd_dmh(RCore *core, const char *input) {
 		return false;
 #endif
 	}
+	if (input[1] == 'j') {
+		r_cons_println ("{}");
+	}
 	return true;
 }
 
@@ -1996,7 +1999,10 @@ static int cmd_debug_map(RCore *core, const char *input) {
 			r_debug_map_sync (core->dbg); // update process memory maps
 			r_debug_map_list (core->dbg, core->offset, input);
 		} else {
-			R_LOG_WARN ("Memory Maps require to be (cfg.debug/-d) in debugger mode. Otherwise use 'om'");
+			R_LOG_INFO ("dm requires the debugger or use `om` instead");
+			if (*input == 'j') {
+				r_cons_println ("{}");
+			}
 		}
 		break;
 	case '=': // "dm="
@@ -3429,9 +3435,11 @@ static void get_backtrace_info(RCore* core, RDebugFrame* frame, ut64 addr, char*
 			*flagdesc2 = r_str_newf ("%s", f->name);
 		}
 	}
-	if (!strcmp (*flagdesc, *flagdesc2)) {
-		free (*flagdesc2);
-		*flagdesc2 = NULL;
+	if (*flagdesc && *flagdesc2) {
+		if (!strcmp (*flagdesc, *flagdesc2)) {
+			free (*flagdesc2);
+			*flagdesc2 = NULL;
+		}
 	}
 	if (pcstr && spstr) {
 		if (core->dbg->bits & R_SYS_BITS_64) {
@@ -5532,12 +5540,10 @@ static int cmd_debug(void *data, const char *input) {
 				RAnalOp *op = r_core_op_anal (core, addr, R_ARCH_OP_MASK_HINT);
 				if (op) {
 					RDebugTracepoint *tp = r_debug_trace_add (core->dbg, addr, op->size);
-					if (!tp) {
-						r_anal_op_free (op);
-						break;
+					if (tp) {
+						tp->count = count;
+						r_anal_trace_bb (core->anal, addr);
 					}
-					tp->count = count;
-					r_anal_trace_bb (core->anal, addr);
 					r_anal_op_free (op);
 				} else {
 					R_LOG_ERROR ("Cannot analyze opcode at 0x%08" PFMT64x, addr);

@@ -31,6 +31,14 @@ typedef struct qjs_arch_plugin_t {
 	// JSValue encode_func;
 } QjsArchPlugin;
 
+typedef struct qjs_parse_plugin_t {
+	char *name;
+	RParsePlugin *iop;
+	R_BORROW JSContext *ctx;
+	JSValue fn_parse_js;
+	// JSValue encode_func;
+} QjsParsePlugin;
+
 typedef struct qjs_io_plugin_t {
 	char *name;
 	RIOPlugin *iop;
@@ -44,6 +52,10 @@ typedef struct qjs_io_plugin_t {
 	// JSValue encode_func;
 } QjsIoPlugin;
 
+static void parse_plugin_fini(QjsParsePlugin *cp) {
+	free (cp->name);
+}
+
 static void core_plugin_fini(QjsCorePlugin *cp) {
 	free (cp->name);
 }
@@ -53,6 +65,7 @@ static void arch_plugin_fini(QjsArchPlugin *ap) {
 	free (ap->arch);
 }
 
+R_VEC_TYPE_WITH_FINI (RVecParsePlugin, QjsParsePlugin, parse_plugin_fini);
 R_VEC_TYPE_WITH_FINI (RVecCorePlugin, QjsCorePlugin, core_plugin_fini);
 R_VEC_TYPE_WITH_FINI (RVecArchPlugin, QjsArchPlugin, arch_plugin_fini);
 R_VEC_TYPE (RVecIoPlugin, QjsIoPlugin); // R2_590 add finalizer function
@@ -65,6 +78,7 @@ typedef struct qjs_plugin_manager_t {
 	RVecCorePlugin core_plugins;
 	RVecArchPlugin arch_plugins;
 	RVecIoPlugin io_plugins;
+	RVecParsePlugin parse_plugins;
 } QjsPluginManager;
 
 static QjsPluginManager *Gpm = NULL;
@@ -74,6 +88,7 @@ static bool plugin_manager_init(QjsPluginManager *pm, RCore *core, JSRuntime *rt
 	RVecCorePlugin_init (&pm->core_plugins);
 	RVecArchPlugin_init (&pm->arch_plugins);
 	RVecIoPlugin_init (&pm->io_plugins);
+	RVecParsePlugin_init (&pm->parse_plugins);
 	return true;
 }
 
@@ -103,7 +118,25 @@ static QjsIoPlugin *plugin_manager_add_io_plugin(QjsPluginManager *pm, const cha
 	return cp;
 }
 
+static QjsParsePlugin *plugin_manager_add_parse_plugin(QjsPluginManager *pm, const char *name, JSContext *ctx, RParsePlugin *iop, JSValue func) {
+	r_return_val_if_fail (pm, NULL);
+
+	QjsParsePlugin *cp = RVecParsePlugin_emplace_back (&pm->parse_plugins);
+	if (cp) {
+		cp->name = name? strdup (name): NULL;
+		cp->ctx = ctx;
+		cp->iop = iop;
+		cp->fn_parse_js = func;
+	}
+	return cp;
+}
+
 static inline int compare_core_plugin_name(const QjsCorePlugin *cp, const void *data) {
+	const char *name = data;
+	return strcmp (cp->name, name);
+}
+
+static inline int compare_parse_plugin_name(const QjsParsePlugin *cp, const void *data) {
 	const char *name = data;
 	return strcmp (cp->name, name);
 }
@@ -111,6 +144,12 @@ static inline int compare_core_plugin_name(const QjsCorePlugin *cp, const void *
 static inline int compare_io_plugin_name(const QjsIoPlugin *cp, const void *data) {
 	const char *name = data;
 	return strcmp (cp->name, name);
+}
+
+static QjsParsePlugin *plugin_manager_find_parse_plugin(const QjsPluginManager *pm, const char *name) {
+	r_return_val_if_fail (pm, NULL);
+
+	return RVecParsePlugin_find (&pm->parse_plugins, (void*) name, compare_parse_plugin_name);
 }
 
 static QjsCorePlugin *plugin_manager_find_core_plugin(const QjsPluginManager *pm, const char *name) {
@@ -123,6 +162,19 @@ static QjsIoPlugin *plugin_manager_find_io_plugin(const QjsPluginManager *pm, co
 	r_return_val_if_fail (pm, NULL);
 
 	return RVecIoPlugin_find (&pm->io_plugins, (void*) name, compare_io_plugin_name);
+}
+
+static bool plugin_manager_remove_parse_plugin(QjsPluginManager *pm, const char *name) {
+	r_return_val_if_fail (pm, false);
+
+	ut64 index = RVecParsePlugin_find_index (&pm->parse_plugins, (void*) name, compare_parse_plugin_name);
+	if (index != UT64_MAX) {
+		pm->core->lang->cmdf (pm->core, "Lp-%s", name);
+		RVecParsePlugin_remove (&pm->parse_plugins, index);
+		return true;
+	}
+
+	return false;
 }
 
 static bool plugin_manager_remove_core_plugin(QjsPluginManager *pm, const char *name) {
@@ -180,10 +232,12 @@ static bool plugin_manager_remove_plugin(QjsPluginManager *pm, const char *type,
 	r_return_val_if_fail (pm, false);
 
 	if (R_STR_ISNOTEMPTY (type)) {
+		if (!strcmp (type, "parse")) {
+			return plugin_manager_remove_parse_plugin (pm, plugin_id);
+		}
 		if (!strcmp (type, "core")) {
 			return plugin_manager_remove_core_plugin (pm, plugin_id);
 		}
-
 		if (!strcmp (type, "arch")) {
 			return plugin_manager_remove_arch_plugin (pm, plugin_id);
 		}
@@ -199,6 +253,7 @@ static void plugin_manager_fini (QjsPluginManager *pm) {
 	RVecCorePlugin_fini (&pm->core_plugins);
 	RVecArchPlugin_fini (&pm->arch_plugins);
 	RVecIoPlugin_fini (&pm->io_plugins);
+	RVecParsePlugin_fini (&pm->parse_plugins);
 	// XXX leaks, but calling it causes crash because not all JS objects are freed
 	// JS_FreeRuntime (pm->rt);
 	pm->rt = NULL;
@@ -207,6 +262,7 @@ static void plugin_manager_fini (QjsPluginManager *pm) {
 #include "qjs/loader.c"
 #include "qjs/arch.c"
 #include "qjs/core.c"
+#include "qjs/parse.c"
 #include "qjs/io.c"
 
 ///////////////////////////////////////////////////////////
@@ -303,6 +359,8 @@ static JSValue r2plugin(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 			return r2plugin_core_load (ctx, this_val, argc, argv);
 		} else if (!strcmp (n, "arch")) {
 			return r2plugin_arch_load (ctx, this_val, argc, argv);
+		} else if (!strcmp (n, "parse")) {
+			return r2plugin_parse_load (ctx, this_val, argc, argv);
 		} else if (!strcmp (n, "io")) {
 			return r2plugin_io (ctx, this_val, argc, argv);
 #if 0
@@ -311,7 +369,7 @@ static JSValue r2plugin(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 #endif
 		} else {
 			// invalid throw exception here
-			return JS_ThrowRangeError(ctx, "invalid r2plugin type");
+			return JS_ThrowRangeError (ctx, "invalid r2plugin type");
 		}
 	}
 	return JS_NewBool (ctx, false);
@@ -551,7 +609,10 @@ static JSValue qjs_r2pipe_instance_cmd(JSContext *ctx, JSValueConst this_val, in
 	if (r2p) {
 		const char *cmd = JS_ToCStringLen2 (ctx, &plen, argv[0], false);
 		char *s = r2pipe_cmd (r2p, cmd);
-		return QJS_STRING (s);
+		if (s) {
+			return QJS_STRING (s);
+		}
+		return JS_ThrowRangeError (ctx, "Empty command returns undefined");
 	}
 	return JS_ThrowRangeError (ctx, "Only one argument permitted");
 }
@@ -677,6 +738,8 @@ static void register_helpers(JSContext *ctx) {
 		"{console.log((typeof x==='string')?x:JSON.stringify(x, null, 2));}"
 		"}");
 	eval (ctx, "var console = { log:print, error:print, debug:print };");
+	eval (ctx, "r2.cmd2 = (x) => JSON.parse(r2.cmd(`'{\"cmd\":\"${x}\"}`));");
+	eval (ctx, "r2.cmd2j = (x) => JSON.parse(r2.cmd(`'{\"cmd\":\"${x}\",\"json\":true}`));");
 	eval (ctx, "r2.cmdj = (x) => JSON.parse(r2.cmd(x));");
 	eval (ctx, "r2.cmdAt = (x, a) => r2.cmd(x + ' @ ' + a);");
 	eval (ctx, "r2.call = (x) => r2.cmd('\"\"' + x);");
@@ -684,13 +747,26 @@ static void register_helpers(JSContext *ctx) {
 	eval (ctx, "var global = globalThis; var G = globalThis;");
 	eval (ctx, js_require_qjs);
 	eval (ctx, "require = function(x) { if (x == 'r2papi') { return new R2Papi(r2); } ; return requirejs(x); }");
-	eval (ctx, "var exports = {};");
+	eval (ctx, "var exports = G;");
 	// eval (ctx, "G.r2pipe = {open: function(){ return R.r2;}};");
 	eval (ctx, "G.R2Pipe=() => R.r2;");
 	if (r_sys_getenv_asbool ("R2_DEBUG_NOPAPI")) {
 		eval (ctx, "R=r2;");
 	} else {
-		eval (ctx, js_r2papi_qjs);
+		char *custom_papi = r_sys_getenv ("R2_PAPI_SCRIPT");
+		if (R_STR_ISNOTEMPTY (custom_papi)) {
+			char *script = r_file_slurp (custom_papi, NULL);
+			if (script) {
+				eval (ctx, script);
+				free (script);
+			} else {
+				R_LOG_ERROR ("Cannot find %s", custom_papi);
+			}
+			free (custom_papi);
+		} else {
+			eval (ctx, js_r2papi_qjs);
+			// r_file_dump ("rapi.qjs", js_r2papi_qjs, strlen (js_r2papi_qjs), 0);
+		}
 		eval (ctx, "R=G.R=new R2Papi(r2);");
 		eval (ctx, "G.Process = new ProcessClass(r2);");
 		eval (ctx, "G.Module = new ModuleClass(r2);");

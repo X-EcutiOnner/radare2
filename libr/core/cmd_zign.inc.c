@@ -1,16 +1,17 @@
-/* radare - LGPL - Copyright 2009-2024 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2024 - pancake, nibble, Dennis Goodlett */
 
 #if R_INCLUDE_BEGIN
 
 static RCoreHelpMessage help_msg_z = {
 	"Usage:", "z[*j-aof/cs] [args] ", "# Manage zignatures",
-	"z", "", "show zignatures",
-	"z.", "", "find matching zignatures in current offset",
+	"z", " ([addr])", "show/list zignatures", // TODO: rename to zl ?
+	"z.", "", "find matching zignatures in current offset", // rename to 'z' ?
+	"z,", "([:help])", "list zignatures loaded in table format (see z,:help)",
 	"zb", "[?][n=5]", "search for best match",
 	"zd", "zignature", "diff current function and signature",
-	"z*", "", "show zignatures in radare format",
-	"zq", "", "show zignatures in quiet mode",
-	"zj", "", "show zignatures in json format",
+	"z*", " ([addr])", "show zignatures in radare format",
+	"zq", " ([addr])", "show zignatures in quiet mode",
+	"zj", " ([addr])", "show zignatures in json format",
 	"zk", "", "show zignatures in sdb format",
 	"z-", "zignature", "delete zignature",
 	"z-", "*", "delete all zignatures",
@@ -278,7 +279,7 @@ static int cmdAdd(void *data, const char *input) {
 			R_LOG_INFO ("generated zignatures: %d", count);
 		}
 		break;
-	case '?':
+	case '?': // “za?”
 		r_core_cmd_help (core, help_msg_za);
 		break;
 	default:
@@ -293,25 +294,25 @@ static int cmdOpen(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 
 	switch (*input) {
-	case ' ':
+	case ' ': // "zo"
 		if (input[1]) {
 			return r_sign_load (core->anal, r_str_trim_head_ro (input + 1), false);
 		}
 		r_core_cmd_help_contains (core, help_msg_zo, "zo");
 		return false;
-	case 's':
+	case 's': // "zos"
 		if (input[1] == ' ' && input[2]) {
 			return r_sign_save (core->anal, r_str_trim_head_ro (input + 2));
 		}
 		r_core_cmd_help_contains (core, help_msg_zo, "zos");
 		return false;
-	case 'z':
+	case 'z': // "zoz"
 		if (input[1] == ' ' && input[2]) {
 			return r_sign_load_gz (core->anal, input + 2, false);
 		}
 		r_core_cmd_help_contains (core, help_msg_zo, "zoz");
 		return false;
-	case '?':
+	case '?': // "zo?"
 		r_core_cmd_help (core, help_msg_zo);
 		break;
 	default:
@@ -326,7 +327,7 @@ static int cmdSpace(void *data, const char *input) {
 	RSpaces *zs = &core->anal->zign_spaces;
 
 	switch (*input) {
-	case '+':
+	case '+': // "zs+"
 		if (!input[1]) {
 			r_core_cmd_help_contains (core, help_msg_zs, "zs+");
 			return false;
@@ -337,14 +338,14 @@ static int cmdSpace(void *data, const char *input) {
 			free (sp);
 		}
 		break;
-	case 'r':
+	case 'r': // "zsr"
 		if (input[1] != ' ' || !input[2]) {
 			r_core_cmd_help_contains (core, help_msg_zs, "zsr");
 			return false;
 		}
 		r_spaces_rename (zs, NULL, input + 2);
 		break;
-	case '-':
+	case '-': // "zs-"
 		if (input[1] == '\x00') {
 			r_spaces_pop (zs);
 		} else if (input[1] == '*') {
@@ -353,19 +354,19 @@ static int cmdSpace(void *data, const char *input) {
 			r_spaces_unset (zs, input + 1);
 		}
 		break;
-	case 'j':
-	case '*':
+	case 'j': // "zsj"
+	case '*': // "zs*"
 	case '\0':
-		spaces_list (zs, input[0]);
+		spaces_list (core, zs, input[0]);
 		break;
-	case ' ':
+	case ' ': // "zs"
 		if (!input[1]) {
 			r_core_cmd_help (core, help_msg_zs);
 			return false;
 		}
 		r_spaces_set (zs, input + 1);
 		break;
-	case '?':
+	case '?': // "zs?"
 		r_core_cmd_help (core, help_msg_zs);
 		break;
 	default:
@@ -380,7 +381,7 @@ static int cmdFlirt(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 
 	switch (*input) {
-	case 'd':
+	case 'd': // "zfd"
 		// TODO
 		if (input[1] != ' ') {
 			r_core_cmd_help_contains (core, help_msg_zf, "zfd");
@@ -388,7 +389,7 @@ static int cmdFlirt(void *data, const char *input) {
 		}
 		r_sign_flirt_dump (core->anal, input + 2);
 		break;
-	case 's':
+	case 's': // "zfs"
 		// TODO
 		if (input[1] != ' ') {
 			r_core_cmd_help_contains (core, help_msg_zf, "zfs");
@@ -403,10 +404,10 @@ static int cmdFlirt(void *data, const char *input) {
 		}
 		r_list_free (files);
 		break;
-	case 'z':
+	case 'z': // "zfz"
 		// TODO
 		break;
-	case '?':
+	case '?': // "zf?"
 		r_core_cmd_help (core, help_msg_zf);
 		break;
 	default:
@@ -927,22 +928,22 @@ static bool bestmatch(void *data, const char *input) {
 	bool json = false;
 	RCore *core = (RCore *)data;
 	switch (input[0]) {
-	case 'r':
+	case 'r': // "zbr"
 		input++;
 		if (*input == 'j') {
 			input++;
 			json = true;
 		}
 		return bestmatch_fcn (core, input, json);
-	case 'j':
+	case 'j': // "zbj"
 		json = true;
 		/* fallthrough */
-	case ' ':
+	case ' ': // "zb"
 		input++;
 		/* fallthrough */
 	case '\x00':
 		return bestmatch_sig (core, input, json);
-	case '?':
+	case '?': // "zb?"
 	default:
 		r_core_cmd_help (core, help_msg_zb);
 		return false;
@@ -1140,7 +1141,7 @@ static int cmdCompare(void *data, const char *input) {
 	RSignOptions *options = r_sign_options_new (raw_bytes_thresh, raw_graph_thresh);
 
 	switch (*input) {
-	case ' ':
+	case ' ': // "zc"
 		if (!input[1]) {
 			r_core_cmd_help (core, help_msg_zc);
 			result = false;
@@ -1150,7 +1151,7 @@ static int cmdCompare(void *data, const char *input) {
 		break;
 	case 'n':
 		switch (input[1]) {
-		case ' ':
+		case ' ': // "zcn"
 			if (!input[2]) {
 				r_core_cmd_help_contains (core, help_msg_zc, "zcn");
 				result = false;
@@ -1158,7 +1159,7 @@ static int cmdCompare(void *data, const char *input) {
 			}
 			result = r_sign_diff_by_name (core->anal, options, input + 2, false);
 			break;
-		case '!':
+		case '!': // "zcn!"
 			if (input[2] != ' ' || !input[3]) {
 				r_core_cmd_help_contains (core, help_msg_zc, "zcn");
 				result = false;
@@ -1171,7 +1172,7 @@ static int cmdCompare(void *data, const char *input) {
 			result = false;
 		}
 		break;
-	case '?':
+	case '?': // "zc?"
 		r_core_cmd_help (core, help_msg_zc);
 		break;
 	default:
@@ -1186,10 +1187,10 @@ static int cmdCompare(void *data, const char *input) {
 
 static int cmdCheck(void *data, const char *input) {
 	RCore *core = (RCore *) data;
-	struct ctxSearchCB ctx;
-	memset (&ctx, 0, sizeof (struct ctxSearchCB));
-	ctx.rad = input[0] == '*';
-	ctx.core = core;
+	struct ctxSearchCB ctx = {
+		.rad = input[0] == '*',
+		.core = core
+	};
 
 	RSignSearchMetrics sm;
 	if (!fill_search_metrics (&sm, core, (void *)&ctx)) {
@@ -1246,7 +1247,7 @@ static int cmdSearch(void *data, const char *input) {
 			r_core_cmd_help_contains (core, help_msg_z_slash, "z/f");
 			return false;
 		}
-	case '?':
+	case '?': // "z/?"
 		r_core_cmd_help (core, help_msg_z_slash);
 		break;
 	default:
@@ -1267,17 +1268,77 @@ static int cmdInfo(void *data, const char *input) {
 	return true;
 }
 
+struct ctxListCB {
+	RAnal *anal;
+	RTable *t;
+};
+
+
+// R2_600 - move into anal/sign.c
+static bool listCB(RSignItem *it, void *user) {
+	struct ctxListCB *ctx = (struct ctxListCB *)user;
+#if 0
+	RAnal *a = ctx->anal;
+	if (!validate_item (it)) {
+		return true;
+	}
+#endif
+	// End item
+	char *bytes = r_hex_bin2strdup (it->bytes->bytes, it->bytes->size);
+	char *masks = r_hex_bin2strdup (it->bytes->mask, it->bytes->size);
+	r_table_add_rowf (ctx->t, "dssss", it->addr, it->name, it->hash->bbhash, bytes, masks);
+	free (bytes);
+	free (masks);
+
+	return true;
+}
+
+static int csvZignatures(RCore *core, const char *arg) {
+	RTable *t = r_table_new ("pxr");
+	RTableColumnType *n = r_table_type ("number");
+	RTableColumnType *s = r_table_type ("string");
+	r_table_add_column (t, n, "addr", 0);
+	r_table_add_column (t, s, "name", 1);
+	r_table_add_column (t, s, "hash", 2);
+	r_table_add_column (t, s, "data", 3);
+	r_table_add_column (t, s, "mask", 4);
+	struct ctxListCB ctx = { core->anal, t };
+	r_sign_foreach (core->anal, listCB, &ctx);
+	if (r_table_query (t, arg)) {
+		char *ts = r_table_tostring (t);
+		r_cons_printf ("%s", ts); // \n?
+		free (ts);
+	}
+	r_table_free (t);
+	return 0;
+}
+
 static int cmd_zign(void *data, const char *input) {
 	RCore *core = (RCore *) data;
 	const char *arg = input + 1;
 
 	switch (*input) {
 	case '\0':
+	case ' ': // "z"
 	case '*': // "z*"
 	case 'q': // "zq"
 	case 'j': // "zj"
-		r_sign_list (core->anal, *input);
+		{
+			ut64 naddr = UT64_MAX;
+			if (*input == ' ' || (*input && input[1] == ' ')) {
+				naddr = r_num_math (core->num, input + 1);
+				if (naddr == 0) {
+					naddr = UT64_MAX;
+				}
+			}
+			ut64 oaddr = core->offset;
+			core->offset = naddr; // XXX R2_600 - this is a hack because we cant break the abi
+			r_sign_list (core->anal, *input);
+			core->offset = oaddr;
+		}
 		break;
+	case ',': // "z,"
+		return csvZignatures (core, arg);
 	case 'k': // "zk"
 		r_core_cmd0 (core, "k anal/zigns/*");
 		break;

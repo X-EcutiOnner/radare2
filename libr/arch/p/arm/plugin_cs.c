@@ -3675,7 +3675,11 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 			op->stackptr = 0;
 			op->ptr = MEMDISP64(1);
 		} else {
-			if (ISIMM64(1)) {
+			if (ISMEM64 (1)) {
+				op->type = R_ANAL_OP_TYPE_LEA;
+				op->disp = MEMDISP64 (1);
+				op->refptr = 8;
+			} else if (ISIMM64 (1)) {
 				op->type = R_ANAL_OP_TYPE_LEA;
 				op->ptr = IMM64(1);
 				op->refptr = 8;
@@ -4639,12 +4643,12 @@ static bool decode(RArchSession *as, RAnalOp *op, RAnalOpMask mask) {
 
 static int archinfo(RArchSession *as, ut32 q) {
 	switch (q) {
-	case R_ANAL_ARCHINFO_DATA_ALIGN:
-	case R_ANAL_ARCHINFO_INV_OP_SIZE:
-	case R_ANAL_ARCHINFO_MAX_OP_SIZE:
+	case R_ARCH_INFO_DATA_ALIGN:
+	case R_ARCH_INFO_INVOP_SIZE:
+	case R_ARCH_INFO_MAXOP_SIZE:
 		break;
-	case R_ANAL_ARCHINFO_MIN_OP_SIZE:
-	case R_ANAL_ARCHINFO_ALIGN: // espai de jocs
+	case R_ARCH_INFO_MINOP_SIZE:
+	case R_ARCH_INFO_CODE_ALIGN:
 		if (as->config && as->config->bits == 16) {
 			return 2;
 		}

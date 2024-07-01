@@ -290,6 +290,16 @@ R_API char *r_core_sysenv_begin(RCore *core, const char *cmd) {
 }
 
 #if !__linux__ && !R2__WINDOWS__
+static bool is_base_map(RDebugMap *map) {
+	if ((map->perm & 1) == 1) { // "--x"
+		// only used by FreeBSD (and PS5)
+		return true;
+	}
+	if ((map->perm & 5) == 5) { // "r-x"
+		return true;
+	}
+	return false;
+}
 static ut64 get_base_from_maps(RCore *core, const char *file) {
 	RDebugMap *map;
 	RListIter *iter;
@@ -297,7 +307,7 @@ static ut64 get_base_from_maps(RCore *core, const char *file) {
 
 	r_debug_map_sync (core->dbg); // update process memory maps
 	r_list_foreach (core->dbg->maps, iter, map) {
-		if ((map->perm & 5) == 5) {
+		if (is_base_map (map)) {
 			// TODO: make this more flexible
 			// XXX - why "copy/" here?
 			if (map->name && strstr (map->name, "copy/")) {
@@ -317,7 +327,7 @@ static ut64 get_base_from_maps(RCore *core, const char *file) {
 	}
 	// fallback resolution copied from cmd_debug.c:r_debug_get_baddr
 	r_list_foreach (core->dbg->maps, iter, map) {
-		if (map->perm == 5) { // r-x
+		if (is_base_map (map)) {
 			return map->addr;
 		}
 	}
@@ -554,7 +564,7 @@ static void load_scripts_for(RCore *core, const char *name) {
 	// imho nobody uses this: run scripts depending on a specific filetype
 	char *file;
 	RListIter *iter;
-	char *hdir = r_str_newf (R_JOIN_2_PATHS (R2_HOME_BINRC, "bin-%s"), name);
+	char *hdir = r_str_newf ("%s%s%s%sbin-%s", R2_HOME_BINRC, R_SYS_DIR, "bin-%s", R_SYS_DIR, name);
 	char *path = r_file_home (hdir);
 	RList *files = r_sys_dir (path);
 	if (!r_list_empty (files)) {

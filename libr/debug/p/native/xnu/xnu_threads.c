@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2022 - pancake */
+/* radare - LGPL - Copyright 2009-2024 - pancake */
 
 #include <r_userconf.h>
 #include <sys/sysctl.h>
@@ -195,7 +195,7 @@ static bool xnu_thread_set_gpr(RDebug *dbg, xnu_thread_t *thread) {
 		if (rc == KERN_SUCCESS) {
 			R_LOG_INFO ("convert from self works");
 		} else {
-			R_LOG_WARN ("failed to convert %d", rc);
+			R_LOG_DEBUG ("failed to convert %d", rc);
 		}
 
 		thread->flavor = ARM_UNIFIED_THREAD_STATE;
@@ -264,13 +264,14 @@ static bool xnu_thread_get_gpr(RDebug *dbg, xnu_thread_t *thread) {
 				     sizeof (x86_thread_state64_t) :
 				     sizeof (x86_thread_state32_t);
 #endif
+#if defined(THREAD_CONVERT_THREAD_STATE_TO_SELF)
 #if !__POWERPC__
 	rc = thread_get_state (thread->port, thread->flavor,
 			       (thread_state_t)regs, &thread->count);
 
 	if (rc == KERN_SUCCESS) {
 		ut32 count = thread->count;
-	    kern_return_t rc;
+		kern_return_t rc;
 		rc = xnu_convert_thread_state (
 			thread->port,
 			THREAD_CONVERT_THREAD_STATE_TO_SELF,
@@ -278,7 +279,7 @@ static bool xnu_thread_get_gpr(RDebug *dbg, xnu_thread_t *thread) {
 			regs, count,
 			regs, &count);
 		if (rc != KERN_SUCCESS) {
-			R_LOG_WARN ("failed to convert %d", rc);
+			R_LOG_DEBUG ("failed to convert %d", rc);
 		}
 #endif
 #if  __arm64e__
@@ -290,6 +291,7 @@ static bool xnu_thread_get_gpr(RDebug *dbg, xnu_thread_t *thread) {
 #endif
 #if !__POWERPC__
 	}
+#endif
 #endif
 	if (rc != KERN_SUCCESS) {
 		r_sys_perror (__FUNCTION__);

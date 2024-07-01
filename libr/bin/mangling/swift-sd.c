@@ -1,8 +1,11 @@
 /* work-in-progress reverse engineered swift-demangler in C
- * Copyright MIT 2015-2023 by pancake@nopcode.org */
+ * Copyright MIT 2015-2024 by pancake@nopcode.org */
 
 #include <r_cons.h>
 #include <r_lib.h>
+
+// R2R db/formats/mangling/swift
+// R2R db/tools/rabin2
 
 // set this to true for debugging purposes
 #define USE_THIS_CODE 1
@@ -81,7 +84,12 @@ static const SwiftType flags [] = {
 
 static const char *getnum(const char* n, int *num) {
 	if (num && *n) {
-		*num = atoi (n);
+		int snum = atoi (n);
+		if (snum > 0) {
+			*num = snum;
+		} else {
+			*num = 0;
+		}
 	}
 	while (*n && *n >= '0' && *n <='9') {
 		n++;
@@ -200,6 +208,40 @@ static inline const char *str_removeprefix(const char *s, const char *prefix) {
 	return s;
 }
 
+static const char *conformsto(char p) {
+	switch (p) {
+	case 'Q':
+		return "Equatable";
+	case 'Y':
+		return "RawRepresentable";
+	case 'X':
+		return "RangeExpression";
+	case 'Z':
+		return "SignedInteger";
+	case 'U':
+		return "UnsignedInteger";
+	case 'T':
+		return "Sequence";
+	case 'M':
+		return "MutableCollection";
+	case 'L':
+		return "Comparable";
+	case 'K':
+		return "BidirectionalCollection";
+	case 'G':
+		return "RandomNumberGenerator";
+	case 'F':
+		return "FloatingPoint";
+	case 'E':
+		return "Encodable";
+	case 'B':
+		return "BinaryFloatingPoint";
+	case 'H':
+		return "Hashable";
+	}
+	return NULL;
+}
+
 static bool looks_valid(char p) {
 	if (IS_DIGIT (p)) {
 		return true;
@@ -209,7 +251,10 @@ static bool looks_valid(char p) {
 	case 'I':
 	case 'M':
 	case 'o':
+	case 'f':
+	case 'N': // ON
 	case 's':
+	case 'S': // SHA SQAAMc
 	case 't':
 	case 'T':
 	case 'v':
@@ -233,10 +278,13 @@ typedef struct {
 	const char *tail;
 } SwiftState;
 
-static char *get_mangled_tail(const char **pp, RStrBuf *out) {
+static const char *get_mangled_tail(const char **pp, RStrBuf *out) {
 	const char *p = *pp;
 	if (R_STR_ISEMPTY (p)) {
 		return NULL;
+	}
+	if (p[1] == 'f') {
+		p++;
 	}
 	switch (p[1]) {
 	case 'T':
@@ -247,6 +295,8 @@ static char *get_mangled_tail(const char **pp, RStrBuf *out) {
 		switch (p[2]) {
 		case 'a':
 			return "..protocol";
+		case 'C':
+			return "..enum.case";
 		}
 		break;
 	case 'F':
@@ -259,16 +309,30 @@ static char *get_mangled_tail(const char **pp, RStrBuf *out) {
 	case 's':
 		// nothing here
 		break;
+	case 'd':
+		return "..deinit";
+	case 'D':
+		return "..deinit.deallocating";
+	case 'N':
+		return "..metadata.type";
 	case 'M':
 		switch (p[2]) {
-		case 'a':
-			return "..accessor.metadata";
 		case 'e':
 			return "..override";
 		case 'm':
 			return "..metaclass";
+		case 'n':
+			return "..nominal.type.descriptor";
+		case 'o':
+			return "..metadata.base";
+		case 'V':
+			return "..method.descriptor";
+		case 'u':
+			return "..method.lookup";
+		case 'a':
+			return "..metadata.accessor";
 		case 'L':
-			return "..lazy.metadata";
+			return "..metadata.lazy";
 		default:
 			return "..metadata";
 		}
@@ -420,6 +484,66 @@ static char *my_swift_demangler(const char *s) {
 					q++;
 				}
 				switch (*q) {
+				case 'A': // skip 'AAC' cases
+					if (!isdigit (q[1])) {
+						q += 2;
+						r_strbuf_append (out, ".");
+						continue;
+					}
+					// ignored stuff here
+					break;
+				case 'C': // "s16IOSSecuritySuiteAACMu"
+				case 'O':
+					if (!isdigit (q[1]) && looks_valid (q[1])) {
+						if (q[1] == 'S') {
+							const char *tail = conformsto (q[2]);
+							if (tail) {
+								r_strbuf_append (out, ".conformsto.");
+								r_strbuf_append (out, tail);
+							} else {
+								R_LOG_DEBUG ("Unhandled s9Alamofire10HTTPMethodO8rawValueACSgSS_tcfC");
+								r_strbuf_append (out, ".");
+								r_strbuf_append (out, q);
+								q = q_end;
+								continue;
+							}
+						} else {
+							const char *tail = get_mangled_tail (&q, out);
+							if (tail) {
+								r_strbuf_append (out, tail);
+							} else {
+								r_strbuf_append (out, ".");
+							}
+						}
+						q++;
+						continue;
+					} else {
+						r_strbuf_append (out, ".");
+						// fallthorugh
+					}
+					if (isdigit (q[1])) {
+						int n = 0;
+						const char *Q = getnum (q + 1, &n);
+						const char *res = getstring (Q, n);
+						if (res) {
+							r_strbuf_append (out, res);
+						}
+						q = Q + n;
+						if (q >= q_end) {
+							continue;
+						}
+						if (isdigit (q[0])) {
+							r_strbuf_append (out, ".");
+							n = 0;
+							const char *Q = getnum (q, &n);
+							const char *res = getstring (Q, n);
+							if (res) {
+								r_strbuf_append (out, res);
+							}
+							q = Q + n;
+						}
+						continue;
+					}
 				case 's':
 					{
 						int n = 0;
@@ -445,7 +569,33 @@ static char *my_swift_demangler(const char *s) {
 					if (q[1] == '1') {
 						q++;
 					}
+					if (*q == 'S') {
+					//	r_strbuf_append (out, ".String");
+					}
 					switch (q[1]) {
+					case 'g':
+						r_strbuf_append (out, q);
+						q = q_end;
+						break;
+					case 'v':
+						if (q + 2 < q_end) {
+							q += 2;
+							const char *tail = get_mangled_tail (&q, out);
+							if (tail) {
+								r_strbuf_append (out, tail);
+							} else {
+								R_LOG_DEBUG ("Unhandled s9Alamofire10HTTPMethodO8rawValueACSgSS_tcfC");
+								r_strbuf_append (out, ".");
+								r_strbuf_append (out, q);
+								q = q_end;
+							}
+						} else {
+							R_LOG_DEBUG ("Unhandled s9Alamofire10HTTPMethodO8rawValueACSgSS_tcfC");
+							r_strbuf_append (out, ".");
+							r_strbuf_append (out, q);
+							q = q_end;
+						}
+						break;
 					case '0':
 						r_strbuf_append (out, " (self) -> ()");
 						if (attr) {
@@ -457,6 +607,7 @@ static char *my_swift_demangler(const char *s) {
 					case 'S':
 						// swift string
 						r_strbuf_append (out, "__String");
+						q++;
 						break;
 					case '_':
 						// swift string
@@ -496,10 +647,36 @@ static char *my_swift_demangler(const char *s) {
 				case '_':
 					// it's return value time!
 					p = resolve (types, q + 1, &attr); // type
-					// printf ("RETURN TYPE %s\n", attr);
+					if (!p) {
+						int n = 0;
+						const char *Q = getnum (q + 1, &n);
+						const char *res = getstring (Q, n);
+						if (res) {
+							r_strbuf_append (out, ".");
+							r_strbuf_append (out, res);
+						}
+						q = Q + n;
+						if (q >= q_end) {
+							continue;
+						}
+						if (isdigit (*q)) {
+							int n = 0;
+							const char *Q = getnum (q, &n);
+							const char *res = getstring (Q, n);
+							if (res) {
+								r_strbuf_append (out, ".");
+								r_strbuf_append (out, res);
+							}
+							q = Q + n;
+						}
+					}
+					q++;
 					break;
 				default:
 					p = resolve (types, q, &attr); // type
+					break;
+				}
+				if (q >= q_end) {
 					break;
 				}
 				if (p) {
@@ -511,7 +688,7 @@ static char *my_swift_demangler(const char *s) {
 					//	attr, len, getstring (q, len));
 					if (!len) {
 						if (is.retmode) {
-							if (q + 1 > q_end) {
+							if (q > q_end) {
 								if (attr) {
 									r_strbuf_appendf (out, " -> %s", attr);
 								}
@@ -568,8 +745,8 @@ static char *my_swift_demangler(const char *s) {
 					q += len;
 					p = q;
 				} else {
-					if (R_STR_ISEMPTY (q)) {
-						break;
+					if (q >= q_end || R_STR_ISEMPTY (q)) {
+						continue;
 					}
 					q++;
 					char *n = strstr (q, "__");
@@ -586,7 +763,7 @@ static char *my_swift_demangler(const char *s) {
 			}
 		}
 	} else {
-		//printf ("Unsupported type: %c\n", *p);
+		R_LOG_DEBUG ("Unsupported swift mangling type: %c", *p);
 	}
 	// https://www.guardsquare.com/blog/swift-native-method-swizzling
 	if (r_str_endswith (s, "FTX")) {

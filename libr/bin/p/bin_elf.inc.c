@@ -103,10 +103,12 @@ static RBinAddr* binsym(RBinFile *bf, int sym) {
 		bool is_arm = eo->ehdr.e_machine == EM_ARM;
 		ret->paddr = addr;
 		ret->vaddr = Elf_(p2v) (eo, addr);
-		if (is_arm && addr & 1) {
-			ret->bits = 16;
-			ret->vaddr--;
-			ret->paddr--;
+		if (is_arm) {
+			if (addr & 1) {
+				ret->bits = 16;
+				ret->vaddr--;
+				ret->paddr--;
+			}
 		}
 	}
 	return ret;
@@ -590,9 +592,9 @@ static RBinReloc *reloc_convert(ELFOBJ* eo, RBinElfReloc *rel, ut64 got_addr) {
 		break;
 	case EM_RISCV:
 		switch (rel->type) {
-		case R_RISCV_NONE:      break;
+		case R_RISCV_NONE: break;
 		case R_RISCV_JUMP_SLOT: ADD(64, 0); break;
-		case R_RISCV_RELATIVE:  ADD(64, B); break;
+		case R_RISCV_RELATIVE: ADD(64, B); break;
 		default: ADD(64, got_addr); break; // reg relocations
 		}
 		break;
@@ -601,7 +603,7 @@ static RBinReloc *reloc_convert(ELFOBJ* eo, RBinElfReloc *rel, ut64 got_addr) {
 		case R_AARCH64_GLOB_DAT: SET (64); break;
 		case R_AARCH64_JUMP_SLOT: SET (64); break;
 		case R_AARCH64_RELATIVE: ADD (64, B); break;
-		  // data references
+		// data references
 		case R_AARCH64_PREL16: ADD (16, B); break;
 		case R_AARCH64_PREL32: ADD (32, B); break;
 		case R_AARCH64_PREL64: ADD (64, B); break;
@@ -679,12 +681,16 @@ static RBinReloc *reloc_convert(ELFOBJ* eo, RBinElfReloc *rel, ut64 got_addr) {
 			R_LOG_DEBUG ("unimplemented ELF/PPC reloc type %d", rel->type);
 		}
 		break;
-	case EM_BPF: switch (rel->type) {
-		case R_BPF_NONE:        break;
-		case R_BPF_64_64:       r->vaddr += 4; ADD (32, 0); break;
-		case R_BPF_64_ABS64:    ADD (64, 0); break;
-		case R_BPF_64_ABS32:    ADD (32, 0); break;
-		case R_BPF_64_NODYLD32: ADD (32, 0); break;
+	case EM_PPC64:
+		switch (rel->type) {
+		case R_PPC64_JMP_SLOT: // 21
+			r->type = R_BIN_RELOC_64;
+			r->vaddr = got_addr + rel->offset; //  - 0x01028;
+			return r;
+		case R_PPC64_ADDR64: // 38
+			r->type = R_BIN_RELOC_64;
+			r->vaddr = got_addr + rel->offset; //  - 0x10028 + 0x1000;
+			return r;
 		default:
 			R_LOG_DEBUG ("Unimplemented ELF/BPF reloc type %d", rel->type);
 			break;
@@ -970,9 +976,7 @@ static void _patch_reloc(ELFOBJ *bo, ut16 e_machine, RIOBind *iob, RBinElfReloc 
 
 static RList* patch_relocs(RBinFile *bf) {
 	r_return_val_if_fail (bf && bf->rbin, NULL);
-	RList *ret = NULL;
 	RBinReloc *ptr = NULL;
-	HtUU *relocs_by_sym;
 	RBin *b = bf->rbin;
 	RIO *io = b->iob.io;
 	if (!io || !io->desc) {
@@ -1029,10 +1033,12 @@ static RList* patch_relocs(RBinFile *bf) {
 	if (!relocs) {
 		return NULL;
 	}
-	if (!(ret = r_list_newf ((RListFree)free))) {
+	RList *ret = r_list_newf ((RListFree)free);
+	if (!ret) {
 		return NULL;
 	}
-	if (!(relocs_by_sym = ht_uu_new0 ())) {
+	HtUU *relocs_by_sym = ht_uu_new0 ();
+	if (!relocs_by_sym) {
 		r_list_free (ret);
 		return NULL;
 	}
@@ -1054,10 +1060,11 @@ static RList* patch_relocs(RBinFile *bf) {
 				plt_entry_addr = sym_addr;
 			}
 		}
-		//ut64 raddr = sym_addr? sym_addr: vaddr;
+		// ut64 raddr = sym_addr? sym_addr: vaddr;
 		ut64 raddr = (sym_addr && sym_addr != UT64_MAX)? sym_addr: vaddr;
 		_patch_reloc (eo, eo->ehdr.e_machine, &b->iob, reloc, raddr, 0, plt_entry_addr);
-		if (!(ptr = reloc_convert (eo, reloc, n_vaddr))) {
+		ptr = reloc_convert (eo, reloc, n_vaddr);
+		if (!ptr) {
 			continue;
 		}
 

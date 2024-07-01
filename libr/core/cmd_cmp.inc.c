@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2023 - pancake */
+/* radare - LGPL - Copyright 2009-2024 - pancake */
 
 #if R_INCLUDE_BEGIN
 
@@ -60,7 +60,7 @@ static RCoreHelpMessage help_msg_cu = {
 	"cu8", " $$+1 > p", "compare qwords from current seek and +1",
 	"cud", " $$+1 > p", "compare disasm current seek and +1",
 	"wu", " p", "apply unified hex patch (see output of cu)",
-	"curl", " [http-url]", "",
+	"curl", " ([-D data]) [http-url]", "",
 	NULL
 };
 
@@ -392,7 +392,7 @@ static int radare_compare(RCore *core, const ut8 *f, const ut8 *d, int len, int 
 		return 0;
 	}
 	if (mode == 'j') {
-		pj = pj_new ();
+		pj = r_core_pj_new (core);
 		if (!pj) {
 			return -1;
 		}
@@ -1079,12 +1079,31 @@ static void cmd_curl(RCore *core, const char *arg) {
 	if (r_sys_getenv_asbool ("R2_CURL")) {
 		r_sys_cmdf ("curl %s", arg);
 	} else {
+		char *postdata = NULL;
+		arg = r_str_trim_head_ro (arg);
+		if (r_str_startswith (arg, "-D")) {
+			if (arg[2] == ' ') {
+				arg = r_str_trim_head_ro (arg + 2);
+				const char *space = strchr (arg, ' ');
+				if (space) {
+					postdata = r_str_ndup (arg, space - arg);
+					arg = space + 1;
+				}
+			}
+			if (!postdata) {
+				r_core_cmd_help_match (core, help_msg_cu, "curl");
+				return;
+			}
+		}
 		if (r_str_startswith (arg, "http://") || r_str_startswith (arg, "https://")) {
 			int len;
-			char *s = r_socket_http_get (arg, NULL, &len);
+			char *s = postdata
+				? r_socket_http_post (arg, postdata, NULL, &len)
+				: r_socket_http_get (arg, NULL, &len);
 			if (s) {
 				r_cons_write (s, len);
 				free (s);
+				r_cons_newline ();
 			}
 		} else {
 			r_core_cmd_help_match (core, help_msg_cu, "curl");
@@ -1340,6 +1359,7 @@ static int cmd_cmp(void *data, const char *input) {
 			r_core_cmd_help_match_spec (core, help_msg_c, "c", width);
 			break;
 		}
+		const bool be = r_config_get_b (core->config, "cfg.bigendian");
 
 		if (width == '1') {
 			if (mode == '*') {
@@ -1349,13 +1369,13 @@ static int cmd_cmp(void *data, const char *input) {
 				val = cmp_bits (core, r_num_math (core->num, arg));
 			}
 		} else if (width == '2') {
-			cmp_val.v16 = (ut16) r_num_math (core->num, arg);
+			r_write_ble16 (&cmp_val.v16, r_num_math (core->num, arg), be);
 			val = radare_compare (core, block, (ut8 *) &cmp_val.v16, sizeof (wordcmp.v16), mode);
 		} else if (width == '4') {
-			cmp_val.v32 = (ut32) r_num_math (core->num, arg);
+			r_write_ble32 (&cmp_val.v32, r_num_math (core->num, arg), be);
 			val = radare_compare (core, block, (ut8 *) &cmp_val.v32, sizeof (wordcmp.v32), mode);
 		} else if (width == '8') {
-			cmp_val.v64 = r_num_math (core->num, arg);
+			r_write_ble64 (&cmp_val.v64, r_num_math (core->num, arg), be);
 			val = radare_compare (core, block, (ut8 *) &cmp_val.v64, sizeof (wordcmp.v64), mode);
 		}
 		break;

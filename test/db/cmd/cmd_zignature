@@ -1097,6 +1097,8 @@ RUN
 
 NAME=PowerPC function with jumpback
 FILE=bins/elf/busybox-powerpc
+# it's broken because (git)capstone-v5 vs (release)capstone-5.0 differ and break the testsuite
+BROKEN=1
 CMDS=<<EOF
 s 0x10002d70
 af
@@ -1109,7 +1111,7 @@ za fcn.10002d70 b 38a0000038c000004bfffed4:ffffffffffffffffff000000
 za fcn.10002d70 g cc=3 nbbs=8 edges=9 ebbs=1 bbsum=232
 za fcn.10002d70 o 0x10002d70
 za fcn.10002d70 t void fcn.10002d70 (int32_t arg1, int32_t arg2, int32_t arg_1030h, int32_t arg_1034h)
-za fcn.10002d70 v fs-4136:var_8h:int32_t, ts4:arg_1034h:int32_t, fs-36:var_100ch:int32_t, ts0:arg_1030h:int32_t, tr5:arg1:int32_t, tr6:arg2:int32_t
+za fcn.10002d70 v fs-4136:var_8h:int32_t, ts4:arg_1034h:int32_t, fs-36:var_100ch:int32_t, ts0:arg_1030h:int32_t, fb-4096:var_1000h:int32_t, tr5:arg1:int32_t, tr6:arg2:int32_t
 za fcn.10002d70 h 5f59f157d9e3548e81fed794bff828e7fc6ab90932a879b643d6d2a30c20c3b0
 EOF
 RUN
@@ -1223,7 +1225,7 @@ zaf
 z* ~za sym._vfprintf_r b
 EOF
 EXPECT=<<EOF
-za sym._vfprintf_r b ff0314d1fd7b00a9fd030091f35301a9f30302aaf55b02a9f76303a9f70300aaf80303aaf96b04a9fa0301aafb7305a9e827066d6a170094000040f9e06700f989efff97e05700f9020180d2e0a3059101008052a4ecff97b70000b4e052:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000ff000000ffffffffff000000ffffffffffffffffffffffffffffffffff000000ff000000ffff
+za sym._vfprintf_r b ff0314d1fd7b00a9fd030091f35301a9f30302aaf55b02a9f76303a9f70300aaf80303aaf96b04a9fa0301aafb7305a9e827066d6a170094000040f9e06700f989efff97e05700f9020180d2e0a3059101008052a4ecff97b70000b4e052:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000ffffffffffffffffff000000ffffffffffffffffffffffffffffffffff000000ff000000ffff
 EOF
 RUN
 
@@ -1304,7 +1306,7 @@ za sym.exact b 415541544989fc55534883ec08e89e02ffff488b2d77952a004889c38b450048:
 zbrj sym.exact 1
 EOF
 EXPECT=<<EOF
-[{"name":"fcn.00410210","similarity":1.000000,"byte similarity":1.000000,"graph similarity":1.000000}]
+[{"name":"fcn.00410210","similarity":1.000,"byte similarity":1.000,"graph similarity":1.000}]
 EOF
 RUN
 
@@ -1814,5 +1816,28 @@ s1:
 s2:
 s3:
 s4:
+EOF
+RUN
+
+NAME=Generate zignature and show only one
+FILE=bins/elf/arg
+CMDS=<<EOF
+aa
+zg
+z $$
+aflc
+EOF
+EXPECT=<<EOF
+entry0:
+  bytes: 31ed4989d15e4889e24883e4f050544c8d053a020000488d0dc3010000488d3d5a010000ff1516092000
+  mask: ffffffffffffffffffffffffffffffff000000000000ff000000000000ff000000000000ff0000000000
+  graph: cc=1 nbbs=1 edges=0 ebbs=1 bbsum=42
+  addr: 0x000006a0
+  next: sym.deregister_tm_clones
+  types: void entry0 (int64_t arg3)
+  refs: sym.__libc_csu_fini, sym.__libc_csu_init, sym.main
+  vars: tr73:arg3:int64_t
+  bbhash: 77ece050bbc234ae3b587a8ef8da536b640f0b000414d63490214c47b18021d2
+18
 EOF
 RUN

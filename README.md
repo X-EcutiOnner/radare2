@@ -6,7 +6,7 @@
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/741/badge)](https://bestpractices.coreinfrastructure.org/projects/741) [![Build Status](https://scan.coverity.com/projects/416/badge.svg)](https://scan.coverity.com/projects/416) [![Discord](https://badgen.net/discord/members/YBey7CR9jf)](https://discord.gg/YBey7CR9jf)
 
 See the [Releases](https://github.com/radareorg/radare2/releases) page for
-downloads. The current git `master` branch is `5.9.1`, next will be `5.9.2`.
+downloads. The current git `master` branch is `5.9.3`, next will be `5.9.4`.
 
 * Since r2-5.6.0 all the patch releases are [abi stable](doc/abi.md)
 * Odd patch versions are used in git builds only, releases use even numbers
@@ -64,15 +64,16 @@ Using the `r2pm` tool you can browse and install many plugins and tools that use
 * [keystone](https://github.com/radareorg/radare2-extras/tree/master/keystone) Assembler instructions using the Keystone library
 * [r2ai](https://github.com/radareorg/r2ai) Run a Language Model in localhost with Llama inside r2!
 * [r2dec](https://github.com/wargio/r2dec-js): A decompiler based on r2 written in JS, accessed with the `pdd` command
-* [r2diaphora](https://github.com/FernandoDoming/r2diaphora): [Diaphora](https://github.com/joxeankoret/diaphora)'s diffing engine working on top of radare2
+* [r2diaphora](https://github.com/FernandoDoming/r2diaphora): [Diaphora](https://github.com/joxeankoret/diaphora)'s binary diffing engine on top of radare2
 * [r2frida](https://github.com/nowsecure/r2frida): The frida io plugin. Start r2 with `r2 frida://0` to use it
-* [r2ghidra](https://github.com/radareorg/r2ghidra): The native ghidra decompiler plugin, accessed with the `pdg` command
+* [r2ghidra](https://github.com/radareorg/r2ghidra): The standalone native ghidra decompiler accessible with `pdg`
 * [r2papi](https://github.com/radareorg/radare2-r2papi) High level api on top of r2pipe
 * [r2pipe](https://github.com/radareorg/radare2-r2pipe) Script radare2 from any programming language
 * [r2poke](https://github.com/radareorg/radare2-extras/tree/master/r2poke) Integration with GNU/Poke for extended binary parsing capabilities
+* [goresym](https://github.com/hanemile/radare2-GoReSym): Import GoReSym symbol as flags
 * [r2yara](https://github.com/radareorg/r2yara) Run Yara from r2 or use r2 primitives from Yara
 * [radius2](https://github.com/nowsecure/radius2): A fast symbolic execution engine based on boolector and esil
-* [r2sarif](https://github.com/radareorg/radare2-extras/tree/master/sarif) import/export SARIF documents, streamlining vulnerability reporting and visualization in binaries
+* [r2sarif](https://github.com/radareorg/r2sarif) import/extend/export SARIF documents
 
 ## Usage
 
@@ -115,14 +116,14 @@ r2pm -l <pkg>   # list installed packages
 
 ## Documentation
 
-Learn more about r2 watching [youtube talks](https://www.youtube.com/c/r2con) from [r2con](https://rada.re/con). There are also many blogposts, slidedecks and the [official radare2 book](https://book.rada.re), but it's always a good idea to join any of the official chats and drop your questions/feedback around.
+Learn more about r2 watching [youtube talks](https://www.youtube.com/c/r2con) from [r2con](https://rada.re/con). There are also many blogposts, slidedecks and the [official radare2 book](https://book.rada.re), but it's always a good idea to join any of the official chats and drop your questions or feedback there.
 
 ## Community
 
 * [irc.libera.chat](https://libera.chat): `#radare`, `#radare_side`
 * [Matrix](https://matrix.to/#/#radare:matrix.org): `#radare:matrix.org`
 * Telegram: [Main](https://t.me/radare) and [Side](https://t.me/radare_side) channels
-* [Discord server](https://discord.gg/YBey7CR9jf)
+* Discord: [Server](https://discord.gg/YBey7CR9jf)
 * Mastodon: [@radareorg](https://infosec.exchange/@radareorg)
 * Website: [https://www.radare.org/](https://www.radare.org/)
 
@@ -130,8 +131,8 @@ Learn more about r2 watching [youtube talks](https://www.youtube.com/c/r2con) fr
 
 ## Operating Systems
 
-Windows (since XP), Linux, Darwin, GNU/Hurd, Apple's {Mac,i,iPad,watch}OS, Android,
-[Dragonfly, Net, Free, Open] BSD, Z/OS, QNX, SerenityOS, Solaris, Haiku, Vinix, FirefoxOS.
+Windows (since XP), Linux, Darwin, GNU/Hurd, Apple's {Mac,i,iPad,watch}OS, Android, Wasmer,
+[Dragonfly, Net, Free, Open] BSD, Z/OS, QNX, SerenityOS, Solaris, AIX, Haiku, Vinix, FirefoxOS.
 
 ## Architectures
 
@@ -141,7 +142,7 @@ CRIS, XAP (CSR), PIC, LM32, 8051, 6502, i4004, i8080, Propeller, EVM, OR1K
 Tricore, CHIP-8, LH5801, T8200, GameBoy, SNES, SPC700, MSP430, Xtensa, xcore,
 NIOS II, Java, Dalvik, Pickle, WebAssembly, MSIL, EBC, TMS320 (c54x, c55x,
 c55+, c64x), Hexagon, Brainfuck, Malbolge, whitespace, DCPU16, LANAI, lm32,
-MCORE, mcs96, RSP, SuperH-4, VAX, KVX, Am29000, LOONGARCH, JDH8, s390x.
+MCORE, mcs96, RSP, SuperH-4, VAX, KVX, Am29000, LOONGARCH, JDH8, s390x, STM8.
 
 ## File Formats
 
@@ -155,14 +156,13 @@ GB/GBA, NDS and N3DS, and mount several filesystems like NTFS, FAT, HFS+, EXT,..
 
 * [![Snap package](https://snapcraft.io/radare2/badge.svg)](https://snapcraft.io/radare2)
 * [![Termux package](https://repology.org/badge/version-for-repo/termux/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![Alpine Linux Edge package](https://repology.org/badge/version-for-repo/alpine_edge/radare2.svg)](https://repology.org/project/radare2/versions) [![Alpine Linux 3.13 package](https://repology.org/badge/version-for-repo/alpine_3_13/radare2.svg)](https://repology.org/project/radare2/versions) [![Alpine Linux 3.12 package](https://repology.org/badge/version-for-repo/alpine_3_12/radare2.svg)](https://repology.org/project/radare2/versions)
+* [![Alpine Linux Edge package](https://repology.org/badge/version-for-repo/alpine_edge/radare2.svg)](https://repology.org/project/radare2/versions) [![Alpine Linux 3.19 package](https://repology.org/badge/version-for-repo/alpine_3_13/radare2.svg)](https://repology.org/project/radare2/versions) [![Alpine Linux 3.18 package](https://repology.org/badge/version-for-repo/alpine_3_12/radare2.svg)](https://repology.org/project/radare2/versions)
 * [![Arch package](https://repology.org/badge/version-for-repo/arch/radare2.svg)](https://repology.org/project/radare2/versions) [![AUR package](https://repology.org/badge/version-for-repo/aur/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![EPEL 7 package](https://repology.org/badge/version-for-repo/epel_7/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![EPEL 8 package](https://repology.org/badge/version-for-repo/epel_8/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![EPEL 9 package](https://repology.org/badge/version-for-repo/epel_9/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![Fedora Dev](https://repology.org/badge/version-for-repo/fedora_rawhide/radare2.svg)](https://repology.org/project/radare2/versions) [![Fedora 36](https://repology.org/badge/version-for-repo/fedora_36/radare2.svg)](https://repology.org/project/radare2/versions) [![Fedora 34](https://repology.org/badge/version-for-repo/fedora_34/radare2.svg)](https://repology.org/project/radare2/versions)
+* [![EPEL 7 package](https://repology.org/badge/version-for-repo/epel_7/radare2.svg)](https://repology.org/project/radare2/versions) [![EPEL 8 package](https://repology.org/badge/version-for-repo/epel_8/radare2.svg)](https://repology.org/project/radare2/versions) [![EPEL 9 package](https://repology.org/badge/version-for-repo/epel_9/radare2.svg)](https://repology.org/project/radare2/versions)
+* [![Fedora Dev](https://repology.org/badge/version-for-repo/fedora_rawhide/radare2.svg)](https://repology.org/project/radare2/versions) [![Fedora 40](https://repology.org/badge/version-for-repo/fedora_40/radare2.svg)](https://repology.org/project/radare2/versions) [![Fedora 39](https://repology.org/badge/version-for-repo/fedora_39/radare2.svg)](https://repology.org/project/radare2/versions)
 * [![FreeBSD port](https://repology.org/badge/version-for-repo/freebsd/radare2.svg)](https://repology.org/project/radare2/versions) [![OpenBSD port](https://repology.org/badge/version-for-repo/openbsd/radare2.svg)](https://repology.org/project/radare2/versions) [![pkgsrc current package](https://repology.org/badge/version-for-repo/pkgsrc_current/radare2.svg)](https://repology.org/project/radare2/versions)
 * [![Homebrew package](https://repology.org/badge/version-for-repo/homebrew/radare2.svg)](https://repology.org/project/radare2/versions) [![MacPorts package](https://repology.org/badge/version-for-repo/macports/radare2.svg)](https://repology.org/project/radare2/versions)
 * [![Haiku Ports](https://repology.org/badge/version-for-repo/haikuports_master/radare2.svg)](https://repology.org/project/radare2/versions) [![Void Linux](https://repology.org/badge/version-for-repo/void_x86_64/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![Ubuntu 20.04 package](https://repology.org/badge/version-for-repo/ubuntu_20_04/radare2.svg)](https://repology.org/project/radare2/versions) [![Ubuntu 18.04 package](https://repology.org/badge/version-for-repo/ubuntu_18_04/radare2.svg)](https://repology.org/project/radare2/versions)
-* [![Debian Unstable package](https://repology.org/badge/version-for-repo/debian_unstable/radare2.svg)](https://repology.org/project/radare2/versions) [![Raspbian Stable package](https://repology.org/badge/version-for-repo/raspbian_stable/radare2.svg)](https://repology.org/project/radare2/versions) [![Kali Linux Rolling package](https://repology.org/badge/version-for-repo/kali_rolling/radare2.svg)](https://repology.org/project/radare2/versions)
+* [![Ubuntu 24.04 package](https://repology.org/badge/version-for-repo/ubuntu_24_04/radare2.svg)](https://repology.org/project/radare2/versions) [![Ubuntu 23.04 package](https://repology.org/badge/version-for-repo/ubuntu_23_04/radare2.svg)](https://repology.org/project/radare2/versions) [![Ubuntu 20.04 package](https://repology.org/badge/version-for-repo/ubuntu_20_04/radare2.svg)](https://repology.org/project/radare2/versions) [![Ubuntu 18.04 package](https://repology.org/badge/version-for-repo/ubuntu_18_04/radare2.svg)](https://repology.org/project/radare2/versions)
+* [![Debian Unstable package](https://repology.org/badge/version-for-repo/debian_unstable/radare2.svg)](https://repology.org/project/radare2/versions) [![Debian 12 package](https://repology.org/badge/version-for-repo/debian_12/radare2.svg)](https://repology.org/project/radare2/versions) 
+[![Kali Linux Rolling package](https://repology.org/badge/version-for-repo/kali_rolling/radare2.svg)](https://repology.org/project/radare2/versions)

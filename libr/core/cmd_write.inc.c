@@ -27,7 +27,7 @@ static RCoreHelpMessage help_msg_w = {
 	"wp", "[?] -|file", "apply radare patch file. See wp? fmi",
 	"wr", " 10", "write 10 random bytes",
 	"ws", "[?] pstring", "write pascal string: 1 byte for length + N for the string",
-	"wt", "[afs][?] [filename] [size]", "write to file (from current seek, blocksize or sz bytes)",
+	"wt", "[?][afs] [filename] [size]", "write to file (from current seek, blocksize or sz bytes)",
 	"ww", " foobar", "write wide string 'f\\x00o\\x00o\\x00b\\x00a\\x00r\\x00'",
 	"wx", "[?][fs] 9090", "write two intel nops (from wxfile or wxseek)",
 	"wX", " 1b2c3d", "fill current block with cyclic hexpairs",
@@ -81,24 +81,25 @@ static RCoreHelpMessage help_msg_wa = {
 static RCoreHelpMessage help_msg_wc = {
 	"Usage:", "wc[jir+-*?]", "  # See `e io.cache = true`",
 	"wc", "", "list all write changes in the current cache layer",
-	"wca", "", "list all write changes in all the cache layers",
-	"wcj", "", "list all write changes in JSON",
-	"wc-", " [from] [to]", "remove write op at curseek or given addr",
-	"wc--", "", "pop (discard) last write cache layer",
-	"wc+", " [from] [to]", "commit change from cache to io",
-	"wc++", "", "push a new io cache layer",
 	"wc*", "", "print write commands to replicate the patches in the current cache layer",
 	"wc**", "", "same as 'wc*' but for all the cache layers",
-	"wcr", "", "revert all writes in the cache",
-	"wcu", "", "undo last change",
+	"wc+", " [from] [to]", "commit change from cache to io",
+	"wc++", "", "push a new io cache layer",
+	"wc-", " [from] [to]", "remove write op at curseek or given addr",
+	"wc--", "", "pop (discard) last write cache layer",
 	"wcU", "", "redo undone change (TODO)",
-	"wci", "", "commit write cache",
-	"wcl", "", "list io cache layers",
-	"wcs", "", "squash the consecutive write ops",
+	"wca", "", "list all write changes in all the cache layers",
+	"wcd", "", "list all write changes in disasm diff format",
 	"wcf", " [file]", "commit write cache into given file",
+	"wci", "", "commit write cache",
+	"wcj", "", "list all write changes in JSON",
+	"wcl", "", "list io cache layers",
 	"wcp", " [fd]", "list all cached write-operations on p-layer for specified fd or current fd",
 	"wcp*", " [fd]", "list all cached write-operations on p-layer in radare commands",
 	"wcpi", " [fd]", "commit and invalidate pcache for specified fd or current fd",
+	"wcr", "", "revert all writes in the cache",
+	"wcs", "", "squash the consecutive write ops",
+	"wcu", "", "undo last change",
 	NULL
 };
 
@@ -398,12 +399,12 @@ static int cmd_wo(void *data, const char *input) {
 			free (args);
 		}
 		break;
-	case 'p': // debrujin patterns
+	case 'p': // debruijn patterns
 		switch (input[1]) {
 		case 'D': // "wopD"
 			{
 				char *sp = strchr (input, ' ');
-				len = sp?  r_num_math (core->num, sp + 1): core->blocksize;
+				len = sp? r_num_math (core->num, sp + 1): core->blocksize;
 			}
 			if (len > 0) {
 				/* XXX This seems to fail at generating long patterns (wopD 512K) */
@@ -1388,6 +1389,39 @@ static int cmd_wc(void *data, const char *input) {
 	case '\0': // "wc"
 		r_io_cache_list (core->io, 0, false);
 		break;
+	case 'd':
+		{
+			RIOCacheLayer *layer;
+			RListIter *liter;
+			r_list_foreach (core->io->cache.layers, liter, layer) {
+				void **iter;
+				// list (io, layer, pj, rad);
+				r_pvector_foreach (layer->vec, iter) {
+					RIOCacheItem *ci = *iter;
+					r_cons_printf ("0x%08"PFMT64x":\n", ci->itv.addr);
+					char *a = r_hex_bin2strdup (ci->data, ci->itv.size);
+					char *b = r_hex_bin2strdup (ci->odata, ci->itv.size);
+					char *a0 = r_core_cmd_strf (core, "pad %s", b);
+					char *b0 = r_core_cmd_strf (core, "pad %s", a);
+					char *a1 = r_str_prefix_all (a0, "- ");
+					char *b1 = r_str_prefix_all (b0, "+ ");
+					r_str_trim (a1);
+					r_str_trim (b1);
+					if (r_config_get_i (core->config, "scr.color") > 0) {
+						r_cons_printf (Color_RED"%s\n"Color_GREEN"%s\n"Color_RESET, a1, b1);
+					} else {
+						r_cons_printf ("%s\n%s\n", a1, b1);
+					}
+					free (a);
+					free (b);
+					free (a0);
+					free (b0);
+					free (a1);
+					free (b1);
+				}
+			}
+		}
+		break;
 	case 'a':
 		if (input[1] == 'j') {
 			r_io_cache_list (core->io, 'j', true);
@@ -1619,157 +1653,157 @@ static int cmd_wt(RCore *core, const char *input) {
 
 	input++;
 	switch (*input) {
-		case 's': { // "wts"
-			ut64 addr = 0;
-			char *host_port;
-			R_BORROW char *host;
-			R_BORROW char *port;
-			ut8 *buf;
-			RSocket *sock;
+	case 's': { // "wts"
+		ut64 addr = 0;
+		char *host_port;
+		R_BORROW char *host;
+		R_BORROW char *port;
+		ut8 *buf;
+		RSocket *sock;
 
-			if (argc < 2) {
-				r_core_cmd_help_match (core, help_msg_wt, "wts");
-				ret = 1;
-				goto leave;
-			}
+		if (argc < 2) {
+			r_core_cmd_help_match (core, help_msg_wt, "wts");
+			ret = 1;
+			goto leave;
+		}
 
-			sz = r_io_size (core->io);
+		sz = r_io_size (core->io);
+		if (sz < 0) {
+			R_LOG_ERROR ("Unknown file size");
+			ret = 1;
+			goto leave;
+		}
+
+		host_port = strdup (argv[1]);
+
+		host = host_port;
+		port = strchr (host_port, ':');
+		if (!port) {
+			r_core_cmd_help_match (core, help_msg_wt, "wts");
+			free (host_port);
+			ret = 1;
+			goto leave;
+		}
+
+		*port++ = 0;
+
+		if (argc > 2) {
+			sz = r_num_math (core->num, argv[2]);
 			if (sz < 0) {
-				R_LOG_ERROR ("Unknown file size");
-				ret = 1;
-				goto leave;
-			}
-
-			host_port = strdup (argv[1]);
-
-			host = host_port;
-			port = strchr (host_port, ':');
-			if (!port) {
-				r_core_cmd_help_match (core, help_msg_wt, "wts");
+				R_LOG_ERROR ("%s is not a valid size", argv[2]);
 				free (host_port);
 				ret = 1;
 				goto leave;
 			}
-
-			*port++ = 0;
-
-			if (argc > 2) {
-				sz = r_num_math (core->num, argv[2]);
-				if (sz < 0) {
-					R_LOG_ERROR ("%s is not a valid size", argv[2]);
-					free (host_port);
-					ret = 1;
-					goto leave;
-				}
-				addr = core->offset;
-			}
-
-			buf = malloc (sz);
-			r_io_read_at (core->io, addr, buf, sz);
-
-			sock = r_socket_new (false);
-			if (r_socket_connect (sock, host, port, R_SOCKET_PROTO_TCP, 0)) {
-				ut64 sent = 0;
-				R_LOG_INFO ("Connection created. Sending data to TCP socket");
-				while (sent < sz) {
-					bool sockret = r_socket_write (sock, buf + sent, sz - sent);
-					if (!sockret) {
-						R_LOG_ERROR ("Socket write error");
-						ret = 1;
-						break;
-					}
-				}
-			} else {
-				R_LOG_ERROR ("Connection to %s failed", host_port);
-				ret = 1;
-			}
-
-			free (host_port);
-			free (buf);
-			r_socket_free (sock);
-			goto leave;
+			addr = core->offset;
 		}
-		case 'f': // "wtf"
-			switch (input[1]) {
-			case '\0':
-			case '?': // "wtf?"
+
+		buf = malloc (sz);
+		r_io_read_at (core->io, addr, buf, sz);
+
+		sock = r_socket_new (false);
+		if (r_socket_connect (sock, host, port, R_SOCKET_PROTO_TCP, 0)) {
+			ut64 sent = 0;
+			R_LOG_INFO ("Connection created. Sending data to TCP socket");
+			while (sent < sz) {
+				bool sockret = r_socket_write (sock, buf + sent, sz - sent);
+				if (!sockret) {
+					R_LOG_ERROR ("Socket write error");
+					ret = 1;
+					break;
+				}
+			}
+		} else {
+			R_LOG_ERROR ("Connection to %s failed", host_port);
+			ret = 1;
+		}
+
+		free (host_port);
+		free (buf);
+		r_socket_free (sock);
+		goto leave;
+	}
+	case 'f': // "wtf"
+		switch (input[1]) {
+		case '\0':
+		case '?': // "wtf?"
+			r_core_cmd_help_match (core, help_msg_wt, "wtf");
+			ret = 1;
+			goto leave;
+		case '!': { // "wtf!"
+			RIOMap *map;
+			if (input[2] == '?') {
+				r_core_cmd_help_match (core, help_msg_wt, "wtf!");
+				ret = 1;
+				goto leave;
+			}
+
+			map = r_io_map_get_at (core->io, poff);
+			if (map) {
+				// convert vaddr to paddr
+				poff = poff - r_io_map_begin (map) + map->delta;
+			}
+
+			sz = r_io_fd_size (core->io, core->io->desc->fd) - core->offset;
+
+			// ignore given size
+			if (argc > 2) {
+				argc = 2;
+			}
+			break;
+		}
+		case 'f': // "wtff"
+			if (input[2] == '?') {
+				r_core_cmd_help_match (core, help_msg_wt, "wtff");
+				ret = 1;
+				goto leave;
+			}
+
+			if (argc > 1) {
+				prefix = argv[1];
+			}
+
+			default_filename_sep = '-';
+			break;
+		default: // "wtf"
+			if (input[2] == '?') {
 				r_core_cmd_help_match (core, help_msg_wt, "wtf");
 				ret = 1;
 				goto leave;
-			case '!': { // "wtf!"
-				RIOMap *map;
-				if (input[2] == '?') {
-					r_core_cmd_help_match (core, help_msg_wt, "wtf!");
-					ret = 1;
-					goto leave;
-				}
-
-				map = r_io_map_get_at (core->io, poff);
-				if (map) {
-					// convert vaddr to paddr
-					poff = poff - r_io_map_begin (map) + map->delta;
-				}
-
-				sz = r_io_fd_size (core->io, core->io->desc->fd) - core->offset;
-
-				// ignore given size
-				if (argc > 2) {
-					argc = 2;
-				}
-				break;
 			}
-			case 'f': // "wtff"
-				if (input[2] == '?') {
-					r_core_cmd_help_match (core, help_msg_wt, "wtff");
+
+			if (r_str_startswith (filename, "base64:")) {
+				const char *encoded = filename + 7;
+				int len;
+				if (strlen (encoded) > 31) {
+					R_LOG_ERROR ("Base64 blob must be fewer than 32 characters");
 					ret = 1;
 					goto leave;
 				}
 
-				if (argc > 1) {
-					prefix = argv[1];
-				}
+				len = r_base64_decode ((ut8 *)fn_local, encoded, -1);
 
-				default_filename_sep = '-';
-				break;
-			default: // "wtf"
-				if (input[2] == '?') {
-					r_core_cmd_help_match (core, help_msg_wt, "wtf");
+				filename = fn_local;
+
+				if (len < 0) {
+					R_LOG_ERROR ("Couldn't decode b64 filename");
 					ret = 1;
 					goto leave;
 				}
-
-				if (r_str_startswith (filename, "base64:")) {
-					const char *encoded = filename + 7;
-					int len;
-					if (strlen (encoded) > 31) {
-						R_LOG_ERROR ("Base64 blob must be fewer than 32 characters");
-						ret = 1;
-						goto leave;
-					}
-
-					len = r_base64_decode ((ut8 *)fn_local, encoded, -1);
-
-					filename = fn_local;
-
-					if (len < 0) {
-						R_LOG_ERROR ("Couldn't decode b64 filename");
-						ret = 1;
-						goto leave;
-					}
-				}
-				break;
 			}
 			break;
-		case 'a':
-			append = true;
-			break;
-		case '\0': // "wt"
-		case ' ': // "wt "
-			break;
-		case '?': // "wt?"
-		default:
-			r_core_cmd_help (core, help_msg_wt);
-			goto leave;
+		}
+		break;
+	case 'a':
+		append = true;
+		break;
+	case '\0': // "wt"
+	case ' ': // "wt "
+		break;
+	case '?': // "wt?"
+	default:
+		r_core_cmd_help (core, help_msg_wt);
+		goto leave;
 	}
 
 	// default filename is prefix.addr

@@ -81,10 +81,7 @@ static void pair_ut64x(PJ *pj, const char *key, ut64 val) {
 
 static void pair_str(PJ *pj, const char *key, const char *val) {
 	if (pj) {
-		if (!val) {
-			val = "";
-		}
-		pj_ks (pj, key, val);
+		pj_ks (pj, key, val? val: "");
 	} else {
 		pair (key, val);
 	}
@@ -153,7 +150,7 @@ R_API void r_core_bin_export_info(RCore *core, int mode) {
 		}
 		if (strstr (dup, ".cparse")) {
 			if (IS_MODE_RAD (mode)) {
-				r_cons_printf ("\"td %s\"\n", v);
+				r_cons_printf ("'td %s\n", v);
 			} else if (IS_MODE_SET (mode)) {
 				char *code = r_str_newf ("%s;", v);
 				char *errmsg = NULL;
@@ -262,7 +259,7 @@ R_API bool r_core_bin_load_structs(RCore *core, const char *file) {
 			return false;
 		}
 	}
-	if (strchr (file, '\"')) { // TODO: escape "?
+	if (strchr (file, '\'') || strchr (file, '\"')) { // TODO: escape "?
 		R_LOG_ERROR ("Invalid char found in filename");
 		return false;
 	}
@@ -911,7 +908,7 @@ static bool bin_info(RCore *r, PJ *pj, int mode, ut64 laddr) {
 				r_str_bool (info->big_endian),
 				info->bits,
 				r_str_bool (R_BIN_DBG_STRIPPED &info->dbg_info));
-			int v = r_anal_archinfo (r->anal, R_ANAL_ARCHINFO_ALIGN);
+			int v = r_anal_archinfo (r->anal, R_ARCH_INFO_CODE_ALIGN);
 			r_cons_printf ("e asm.codealign=%d\n", (v > 0)? v: 0);
 			if (R_STR_ISNOTEMPTY (info->lang) && info->lang[0] != '?') {
 				r_cons_printf ("e bin.lang=%s\n", info->lang);
@@ -1414,15 +1411,21 @@ static bool bin_main(RCore *r, PJ *pj, int mode, int va) {
 		return false;
 	}
 	ut64 addr = va ? a2b (r->bin, binmain->vaddr) : binmain->paddr;
-
+	bool isthumb = (binmain->bits == 16);
 	if (IS_MODE_SET (mode)) {
 		r_flag_space_set (r->flags, R_FLAGS_FS_SYMBOLS);
 		r_flag_set (r->flags, "main", addr, r->blocksize);
+		if (isthumb) {
+			r_core_cmdf (r, "ahb 16 @ 0x%08"PFMT64x, addr);
+		}
 	} else if (IS_MODE_SIMPLE (mode)) {
 		r_cons_printf ("%"PFMT64d, addr);
 	} else if (IS_MODE_RAD (mode)) {
 		r_cons_printf ("fs symbols\n");
 		r_cons_printf ("f main @ 0x%08"PFMT64x"\n", addr);
+		if (isthumb) {
+			r_cons_printf ("ahb 16 @ 0x%08"PFMT64x"\n", addr);
+		}
 	} else if (IS_MODE_JSON (mode)) {
 		pj_o (pj);
 		pj_kn (pj, "vaddr", addr);
@@ -2992,6 +2995,7 @@ static bool bin_map_sections_to_segments(RBin *bin, PJ *pj, int mode) {
 		free (s);
 	}
 	r_list_free (segments);
+	r_list_free (sections);
 	r_table_free (table);
 	return true;
 }
@@ -3002,7 +3006,6 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 	RBinInfo *info = NULL;
 	RListIter *iter;
 	RTable *table = r_core_table (r, "sections");
-	r_return_val_if_fail (table, false);
 	int i = 0;
 	int fd = -1;
 	bool printHere = false;
@@ -3012,17 +3015,29 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 #endif
 	HtPP *dup_chk_ht = ht_pp_new0 ();
 	bool ret = false;
-	const char *type = print_segments ? "segment" : "section";
+	const char *type = print_segments? "segment": "section";
 	bool segments_only = true;
 	RList *io_section_info = NULL;
 	ut64 bin_hashlimit = r_config_get_i (r->config, "bin.hashlimit");
+	if (r->bin->cur == NULL) {
+		if (pj) {
+			pj_a (pj);
+			pj_end (pj);
+		}
+		return false;
+	}
+	r_io_use_fd (r->io, r->bin->cur->fd);
 	ut64 filesize = (r->io->desc) ? r_io_fd_size (r->io, r->io->desc->fd): 0;
 
 	if (!dup_chk_ht) {
+		r_table_free (table);
 		return false;
 	}
 
 	if (chksum && *chksum == '.') {
+		if (at == UT64_MAX) {
+			at = r->offset;
+		}
 		printHere = true;
 		chksum++;
 	}
@@ -3032,6 +3047,8 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 		RList *list = r_list_newf ((RListFree) r_listinfo_free);
 		if (!list) {
 			free (hashtypes);
+			ht_pp_free (dup_chk_ht);
+			r_table_free (table);
 			return false;
 		}
 		RBinSection *s;
@@ -3098,24 +3115,24 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 		}
 		io_section_info = r_list_newf ((RListFree)free);
 	}
+	int plimit = filesize? R_MIN (filesize, bin_hashlimit): bin_hashlimit;
 	r_list_foreach (sections, iter, section) {
 		char perms[] = "----";
 		int va_sect = va;
-		ut64 addr, size;
 
 		if (va && !(section->perm & R_PERM_R)) {
 			va_sect = VA_NOREBASE;
 		}
-		addr = rva (r->bin, section->paddr, section->vaddr, va_sect);
-		size = va ? section->vsize : section->size;
+		ut64 addr = rva (r->bin, section->paddr, section->vaddr, va_sect);
+		ut64 size = va ? section->vsize : section->size;
 		if (name && strcmp (section->name, name)) {
 			continue;
 		}
-
+#if 0
 		if (printHere && !(addr <= r->offset && r->offset < (addr + size))) {
 			continue;
 		}
-
+#endif
 		if (at != UT64_MAX && (!size || !is_in_range (at, addr, size))) {
 			continue;
 		}
@@ -3228,8 +3245,7 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 			char *hashstr = NULL;
 			if (hashtypes) {
 				int datalen = section->size;
-				int limit = filesize? R_MIN (filesize, bin_hashlimit): bin_hashlimit;
-				if (datalen > 0 && datalen < limit) {
+				if (datalen > 0 && datalen < plimit) {
 					ut8 *data = malloc (datalen);
 					if (!data) {
 						goto out;
@@ -3263,8 +3279,7 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 			pj_ks (pj, "perm", perms);
 			if (hashtypes && (int)section->size > 0) {
 				int datalen = section->size;
-				int limit = filesize? R_MIN (filesize, bin_hashlimit): bin_hashlimit;
-				if (datalen > 0 && datalen < limit) {
+				if (datalen > 0 && datalen < plimit) {
 					ut8 *data = malloc (datalen);
 					if (!data) {
 						goto out;
@@ -3276,8 +3291,8 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 						R_LOG_ERROR ("Cannot read section at 0x%08"PFMT64x, section->paddr);
 					}
 					free (data);
-				} else if (r->bin->verbose) {
-					R_LOG_ERROR ("Section at 0x%08"PFMT64x" larger than bin.hashlimit", section->paddr);
+				} else { // if (r->bin->verbose) {
+					R_LOG_WARN ("Section at 0x%08"PFMT64x" larger than bin.hashlimit", section->paddr);
 				}
 			}
 			pj_kn (pj, "paddr", section->paddr);
@@ -3287,9 +3302,8 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 			char *hashstr = NULL, str[128];
 			if (hashtypes && section->size > 0) {
 				int datalen = section->size;
-				int limit = filesize? R_MIN (filesize, bin_hashlimit): bin_hashlimit;
-				if (datalen > 0 && datalen < limit) {
-					ut8 *data = malloc (datalen);
+				if (datalen > 0 && datalen < plimit) {
+					ut8 *data = calloc (datalen, 1);
 					if (!data) {
 						goto out;
 					}
@@ -3297,10 +3311,11 @@ static bool bin_sections(RCore *r, PJ *pj, int mode, ut64 laddr, int va, ut64 at
 					if (dl == datalen) {
 						hashstr = build_hash_string (pj, mode, hashtypes, data, datalen);
 					} else if (r->bin->verbose) {
-						R_LOG_ERROR ("Cannot read section at 0x%08"PFMT64x, section->paddr);
+						hashstr = strdup ("*error*");
+						R_LOG_WARN ("Cannot read section at 0x%08"PFMT64x, section->paddr);
 					}
 					free (data);
-				} else if (r->bin->verbose) {
+				} else {
 					R_LOG_WARN ("Section at 0x%08"PFMT64x" larger than bin.hashlimit", section->paddr);
 				}
 			}
@@ -3383,6 +3398,7 @@ out:
 	free (hashtypes);
 	r_table_free (table);
 	ht_pp_free (dup_chk_ht);
+	r_list_free (io_section_info);
 	return ret;
 }
 
@@ -3394,6 +3410,10 @@ static bool bin_fields(RCore *r, PJ *pj, int mode, int va) {
 	RBin *bin = r->bin;
 	RBinObject *o = r_bin_cur_object (bin);
 	if (!o) {
+		if (IS_MODE_JSON (mode)) {
+			pj_o (pj);
+			pj_end (pj);
+		}
 		return false;
 	}
 	RList *fields = o->fields;
@@ -3634,9 +3654,11 @@ static void classdump_c(RCore *r, RBinClass *c) {
 			char *n = objc_name_toc (fn);
 			char *t = ft? objc_type_toc (ft): NULL;
 			if (f->offset < 32 && !t) {
+				free (n);
 				continue;
 			}
 			if (R_STR_ISEMPTY (t)) {
+				free (t);
 				t = strdup ("void*");
 			}
 			if (!is_objc && !strcmp (n, "isa")) {
@@ -3671,9 +3693,11 @@ static void classdump_cxx(RCore *r, RBinClass *c) {
 			char *n = objc_name_toc (fn);
 			char *t = ft? objc_type_toc (ft): NULL;
 			if (f->offset < 32 && !t) {
+				free (n);
 				continue;
 			}
 			if (R_STR_ISEMPTY (t)) {
+				free (t);
 				t = strdup ("void*");
 			}
 			if (!is_objc && !strcmp (n, "isa")) {
@@ -3795,7 +3819,7 @@ static void classdump_swift(RCore *r, RBinClass *c) {
 		if (ms) {
 			mn = ms + strlen ("method.");
 		}
-		r_cons_printf ("  func %s", mn);
+		r_cons_printf ("  func %s", mn? mn: ms? ms: "method");
 		if (!strchr (mn, '(')) {
 			r_cons_printf ("()");
 		}
@@ -4038,6 +4062,7 @@ static bool bin_classes(RCore *r, PJ *pj, int mode) {
 					char *n = objc_name_toc (fn);
 					char *t = objc_type_toc (tn);
 					if (R_STR_ISEMPTY (t)) {
+						free (t);
 						t = strdup ("void* ");
 					}
 					r_cons_printf (" %s %s;", t, n);

@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2023 - pancake */
+/* radare - LGPL - Copyright 2009-2024 - pancake */
 
 #include <r_core.h>
 
@@ -1184,7 +1184,7 @@ static void *show_class(RCore *core, int mode, int *idx, RBinClass *_c, const ch
 	int skip = *idx - 10;
 	bool found = false;
 
-	const char *_cname = r_bin_name_tostring (_c->name);
+	const char *_cname = _c? r_bin_name_tostring (_c->name): "";
 	switch (mode) {
 	case 'c':
 		r_cons_printf ("[hjkl_/Cfm]> classes:\n\n");
@@ -1235,6 +1235,7 @@ static void *show_class(RCore *core, int mode, int *idx, RBinClass *_c, const ch
 	case 'f':
 		// show fields
 		r_cons_printf ("[hjkl_/cFm]> fields of %s:\n\n", _cname);
+		if (_c)
 		r_list_foreach (_c->fields, iter, f) {
 			const char *name = r_bin_name_tostring2 (f->name, 'f');
 			if (grep) {
@@ -1280,7 +1281,7 @@ static void *show_class(RCore *core, int mode, int *idx, RBinClass *_c, const ch
 		}
 		if (!fur) {
 			*idx = i - 1;
-			if (r_list_empty (_c->fields)) {
+			if (_c && r_list_empty (_c->fields)) {
 				return NULL;
 			}
 			// r_cons_clear00 ();
@@ -1339,7 +1340,7 @@ static void *show_class(RCore *core, int mode, int *idx, RBinClass *_c, const ch
 		}
 		if (!mur) {
 			*idx = i - 1;
-			if (r_list_empty (_c->methods)) {
+			if (_c && r_list_empty (_c->methods)) {
 				return NULL;
 			}
 			// r_cons_clear00 ();
@@ -4066,6 +4067,7 @@ R_API void r_core_visual_define(RCore *core, const char *args, int distance) {
 		,"[Vd]- Define current block as:"
 		," $    define flag size"
 		," 1    edit bits"
+		," >    small integer (shift right by 1)"
 		," a    assembly"
 		," b    as byte (1 byte)"
 		," B    define half word (16 bit, 2 byte size)"

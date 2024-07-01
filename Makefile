@@ -311,16 +311,6 @@ user-wrap=echo "\#!/bin/sh" > ~/bin/"$1" \
 ; echo "${PWD}/env.sh '${PREFIX}' '$1' \"\$$@\"" >> ~/bin/"$1" \
 ; chmod +x ~/bin/"$1" ;
 
-user-install:
-	mkdir -p ~/bin
-	$(foreach mod,$(R2BINS),$(call user-wrap,$(mod)))
-	cd ~/bin ; ln -fs radare2 r2
-
-user-uninstall:
-	$(foreach mod,$(R2BINS),rm -f ~/bin/"$(mod)")
-	rm -f ~/bin/r2
-	-rmdir ~/bin
-
 purge-dev:
 	rm -f "${DESTDIR}${LIBDIR}/libr_"*".${EXT_AR}"
 	rm -f "${DESTDIR}${LIBDIR}/pkgconfig/r_"*.pc
@@ -350,6 +340,9 @@ purge: purge-doc purge-dev uninstall user-uninstall
 
 system-purge: purge
 	sys/purge.sh
+
+user-purge:
+	rm -rf $(HOME)/.local/share/radare2
 
 dist:
 	$(MAKE) -C dist/tarball

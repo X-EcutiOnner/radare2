@@ -117,7 +117,7 @@ R_API void r_str_reverse(char *str) {
 R_API int r_str_bits(char *strout, const ut8 *buf, int len, const char *bitz) {
 	int i, j, idx;
 	if (bitz) {
-		for (i = j = 0; i < len && (!bitz||bitz[i]); i++) {
+		for (i = j = 0; i < len && (!bitz || bitz[i]); i++) {
 			if (i > 0 && (i % 8) == 0) {
 				buf++;
 			}
@@ -3457,6 +3457,7 @@ R_API RList *r_str_split_list(char *str, const char *c, int n)  {
 			*e = 0;
 			e += clen;
 		}
+		// TODO: make string trim optional
 		r_str_trim (aux);
 		r_list_append (lst, aux);
 		aux = e;
@@ -4008,15 +4009,23 @@ R_API const char *r_str_str_xy(const char *s, const char *word, const char *prev
 R_API char *r_str_version(const char *program) {
 	const char *release = "";
 	const char *asanstr = "";
+	const char *newabi = "";
 	const char *gplstr = "lgpl";
 	char optistr[5] = " -O?";
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 	asanstr = " asan";
 #endif
+#else
+#if defined(__SANITIZE_ADDRESS__) // gcc < 14
+	asanstr = " asan";
+#endif
 #endif
 #if R2_VERSION_COMMIT == 0
 	release = " release";
+#endif
+#if R2_USE_NEW_ABI
+	newabi = " newabi";
 #endif
 #ifdef _FORTIFY_SOURCE
 	// clang
@@ -4037,11 +4046,13 @@ R_API char *r_str_version(const char *program) {
 	int csv = R2_CSVERSION;
 	s = r_str_appendf (s, "birth: git.%s "R2_BIRTH"\n",
 			*R2_GITTAP ? R2_GITTAP: "");
-	if (*R2_GITTIP) {
-		s = r_str_append (s, "commit: "R2_GITTIP"\n");
+	if (*R2_GITTIP) { // Can't use && because of a bug in clang :lol:
+		if (strcmp (R2_GITTIP, "unknown")) {
+			s = r_str_append (s, "commit: "R2_GITTIP"\n");
+		}
 	}
-	s = r_str_appendf (s, "options:%s%s%s%s cs:%d cl:%d %s",
-			gplstr, asanstr, release, optistr, csv, R_CHECKS_LEVEL, R_BUILDSYSTEM);
+	s = r_str_appendf (s, "options:%s%s%s%s%s cs:%d cl:%d %s",
+			gplstr, asanstr, newabi, release, optistr, csv, R_CHECKS_LEVEL, R_BUILDSYSTEM);
 	return s;
 }
 

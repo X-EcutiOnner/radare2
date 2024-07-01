@@ -48,6 +48,19 @@ else
   ]
 endif
 
+if get_option('use_libsqsh')
+  libsqsh_dep = dependency('libsqsh', version: '>=1.4.0', required: false)
+  if libsqsh_dep.found()
+    r_fs_sources += [
+      'p/fs_squashfs.c'
+    ]
+    r_fs_deps += [ libsqsh_dep ]
+    if get_option('blob')
+      r_fs_static_deps += [ libsqsh_static_dep ]
+    endif
+  endif
+endif
+
 r_fs = library('r_fs', r_fs_sources,
   include_directories: platform_inc,
   c_args: r_fs_cflags,

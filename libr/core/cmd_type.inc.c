@@ -290,7 +290,7 @@ static void showFormat(RCore *core, const char *name, int mode) {
 		if (fmt) {
 			r_str_trim (fmt);
 			if (mode == 'j') {
-				PJ *pj = pj_new ();
+				PJ *pj = r_core_pj_new (core);
 				if (!pj) {
 					return;
 				}
@@ -671,7 +671,7 @@ static void printFunctionTypeC(RCore *core, const char *input) {
 
 static void printFunctionType(RCore *core, const char *input) {
 	Sdb *TDB = core->anal->sdb_types;
-	PJ *pj = pj_new ();
+	PJ *pj = r_core_pj_new (core);
 	if (!pj) {
 		return;
 	}
@@ -798,7 +798,7 @@ static bool print_typelist_json_cb(void *p, const char *k, const char *v) {
 	if (!v) {
 		v = "";
 	}
-	PJ *pj = pj_new ();
+	PJ *pj = r_core_pj_new (core);
 	pj_o (pj);
 	Sdb *sdb = core->anal->sdb_types;
 	char *sizecmd = r_str_newf ("type.%s.size", k);
@@ -884,7 +884,7 @@ R_API int r_core_get_stacksz(RCore *core, ut64 from, ut64 to) {
 	if (from >= to) {
 		return 0;
 	}
-	const int mininstrsz = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
+	const int mininstrsz = r_anal_archinfo (core->anal, R_ARCH_INFO_MINOP_SIZE);
 	const int minopcode = R_MAX (1, mininstrsz);
 	while (at < to) {
 		RAnalOp *op = r_core_anal_op (core, at, R_ARCH_OP_MASK_BASIC);
@@ -955,8 +955,8 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 	}
 	r_esil_setup (esil, core->anal, 0, 0, 0);
 	int i, ret, bsize = R_MAX (64, core->blocksize);
-	const int mininstrsz = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
-	const int maxinstrsz = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+	const int mininstrsz = r_anal_archinfo (core->anal, R_ARCH_INFO_MINOP_SIZE);
+	const int maxinstrsz = r_anal_archinfo (core->anal, R_ARCH_INFO_MAXOP_SIZE);
 	const int minopcode = R_MAX (1, mininstrsz);
 	ut8 *buf = malloc (bsize);
 	if (!buf) {
@@ -1275,7 +1275,7 @@ static int cmd_type(void *data, const char *input) {
 				SdbKv *kv;
 				SdbListIter *iter;
 				SdbList *l = sdb_foreach_list (TDB, true);
-				PJ *pj = pj_new ();
+				PJ *pj = r_core_pj_new (core);
 				pj_o (pj);
 				ls_foreach (l, iter, kv) {
 					if (!strcmp (sdbkv_value (kv), "enum")
@@ -1307,7 +1307,7 @@ static int cmd_type(void *data, const char *input) {
 				r_core_cmd_help_contains (core, help_msg_te, "tej");
 			} else { // "tej ENUM"
 				RListIter *iter;
-				PJ *pj = pj_new ();
+				PJ *pj = r_core_pj_new (core);
 				RTypeEnum *member;
 				pj_o (pj);
 				if (member_name) {
@@ -1855,7 +1855,7 @@ static int cmd_type(void *data, const char *input) {
 		if (!input[1] || input[1] == 'j') {
 			PJ *pj = NULL;
 			if (input[1] == 'j') {
-				pj = pj_new ();
+				pj = r_core_pj_new (core);
 				pj_o (pj);
 			}
 			char *name = NULL;

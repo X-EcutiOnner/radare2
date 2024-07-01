@@ -1692,13 +1692,25 @@ static char *regs(RArchSession *as) {
 }
 
 static int archinfo(RArchSession *as, ut32 q) {
-	// XXX
-	return 0;
+	switch (q) {
+	case R_ARCH_INFO_CODE_ALIGN:
+		return 1;
+	case R_ARCH_INFO_MAXOP_SIZE:
+		return 6;
+	case R_ARCH_INFO_INVOP_SIZE:
+		return 2;
+	case R_ARCH_INFO_MINOP_SIZE:
+		return 2;
+	case R_ARCH_INFO_ISVM:
+		return R_ARCH_INFO_ISVM;
+	}
+	return -1;
 }
 
 const RArchPlugin r_arch_plugin_dalvik = {
 	.meta = {
 		.name = "dalvik",
+		.author = "pancake",
 		.desc = "Dalvik (Android VM) bytecode analysis plugin",
 		.license = "LGPL3",
 	},

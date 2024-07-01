@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2023 - pancake, nibble, dso */
+/* radare2 - LGPL - Copyright 2009-2024 - pancake, nibble, dso */
 
 #define R_LOG_ORIGIN "bin"
 
@@ -1551,7 +1551,8 @@ R_API char *r_bin_name_tostring2(RBinName *bn, int type) {
 	}
 	if (type == 'd' && bn->name) {
 		return bn->name;
-	} else if (type == 'f' && bn->fname) {
+	}
+	if (type == 'f' && bn->fname) {
 		if (bn->fname) {
 			return bn->fname;
 		}

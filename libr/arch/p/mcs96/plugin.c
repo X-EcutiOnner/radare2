@@ -120,9 +120,9 @@ static bool decode(RArchSession *as, RAnalOp *op, RArchDecodeMask mask) {
 // WORDs must be aligned at even byte boundaries in the address space
 static int archinfo(RArchSession *as, ut32 q) {
 	switch (q) {
-	case R_ANAL_ARCHINFO_ALIGN:
+	case R_ARCH_INFO_CODE_ALIGN:
 		return 1;
-	case R_ANAL_ARCHINFO_DATA_ALIGN:
+	case R_ARCH_INFO_DATA_ALIGN:
 		return 2; // data alignment depends on word size used
 #if 0
 	case R_ARCH_INFO_DATA4_ALIGN:
@@ -130,9 +130,9 @@ static int archinfo(RArchSession *as, ut32 q) {
 	case R_ARCH_INFO_DATA8_ALIGN:
 		return 8;
 #endif
-	case R_ANAL_ARCHINFO_MAX_OP_SIZE:
+	case R_ARCH_INFO_MAXOP_SIZE:
 		return 5;
-	case R_ANAL_ARCHINFO_MIN_OP_SIZE:
+	case R_ARCH_INFO_MINOP_SIZE:
 		return 1;
 	}
 	return 0;

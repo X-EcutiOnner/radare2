@@ -372,19 +372,6 @@ static void update_analarch_options(RCore *core, RConfigNode *node) {
 	}
 }
 
-static void update_archarch_options(RCore *core, RConfigNode *node) {
-	RArchPlugin *ap;
-	RListIter *it;
-	if (core && core->anal && core->anal->arch && node) {
-		r_config_node_purge_options (node);
-		r_list_foreach (core->anal->arch->plugins, it, ap) {
-			if (ap->meta.name) {
-				SETOPTIONS (node, ap->meta.name, NULL);
-			}
-		}
-	}
-}
-
 static bool cb_analarch(void *user, void *data) {
 	RCore *core = (RCore*) user;
 	RConfigNode *node = (RConfigNode*) data;
@@ -512,53 +499,6 @@ static bool cb_archendian(void *user, void *data) {
 	}
 	return false;
 }
-
-static bool cb_archarch(void *user, void *data) {
-	RCore *core = (RCore *)user;
-	RConfigNode *node = (RConfigNode *)data;
-	if (*node->value == '?') {
-		update_archarch_options (core, node);
-		print_node_options (node);
-		return false;
-	}
-	r_return_val_if_fail (node && core && core->anal && core->anal->arch, false);
-	return core->anal->arch? r_arch_set_arch (core->anal->arch, node->value): true;
-}
-
-static bool cb_archarch_getter(RCore *core, RConfigNode *node) {
-	r_return_val_if_fail (node && core && core->anal && core->anal->arch, false);
-	if (core->anal->arch->cfg && core->anal->arch->cfg->arch) {
-		node->value = strdup (core->anal->arch->cfg->arch);
-	}
-	return true;
-}
-
-#if 0
-static bool cb_archautoselect(void *user, void *data) {
-	RCore *core = (RCore *)user;
-	RConfigNode *node = (RConfigNode *)data;
-	r_return_val_if_fail (node && core && core->anal && core->anal->arch, false);
-	core->anal->arch->autoselect = node->i_value;
-	return true;
-}
-
-static bool cb_analcpu(void *user, void *data) {
-	RCore *core = (RCore *) user;
-	RConfigNode *node = (RConfigNode *) data;
-	if (strstr (node->value, "?")) {
-		ranal2_list (core, r_config_get (core->config, "anal.arch"), node->value[1]);
-	}
-	// r_anal_set_cpu (core->anal, node->value);
-	r_arch_config_set_cpu (core->anal->config, node->value);
-	/* set codealign */
-	int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
- 	if (v != -1) {
- 		core->anal->config->codealign = v;
- 	}
-	r_config_set_i (core->config, "asm.codealign", (v != -1)? v: 0);
-	return true;
-}
-#endif
 
 static bool cb_analrecont(void *user, void *data) {
 	RCore *core = (RCore*) user;
@@ -859,7 +799,7 @@ static bool cb_asmarch(void *user, void *data) {
 		update_asmcpu_options (core, asmcpu);
 	}
 	{
-		int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
+		int v = r_anal_archinfo (core->anal, R_ARCH_INFO_CODE_ALIGN);
 		r_config_set_i (core->config, "asm.codealign", (v != -1)? v: 0);
 	}
 	/* reload types and cc info */
@@ -954,7 +894,7 @@ static bool cb_asmbits(void *user, void *data) {
 			r_config_set_i (core->config, "dbg.bpsize", r_bp_size (core->dbg->bp));
 		}
 		/* set codealign */
-		int v = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_ALIGN);
+		int v = r_anal_archinfo (core->anal, R_ARCH_INFO_CODE_ALIGN);
 		r_config_set_i (core->config, "asm.codealign", (v != -1)? v: 0);
 	}
 	return ret;
@@ -1458,6 +1398,20 @@ static bool cb_dirsrc(void *user, void *data) {
 	core->bin->srcdir = strdup (node->value);
 	return true;
 }
+
+#if R2_USE_NEW_ABI
+static bool cb_dirsrc_base(void *user, void *data) {
+	RConfigNode *node = (RConfigNode*) data;
+	RCore *core = (RCore *)user;
+	free (core->bin->srcdir);
+	if (R_STR_ISNOTEMPTY (node->value)) {
+		core->bin->srcdir = strdup (node->value);
+	} else {
+		core->bin->srcdir = NULL;
+	}
+	return true;
+}
+#endif
 
 static bool cb_cfgsanbox_grain(void *user, void *data) {
 	RConfigNode *node = (RConfigNode*) data;
@@ -3487,6 +3441,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("anal.limits", "false", (RConfigCallback)&cb_anal_limits, "restrict analysis to address range [anal.from:anal.to]");
 	SETCB ("anal.noret.refs", "false", (RConfigCallback)&cb_anal_noret_refs, "recursive no return checks (EXPERIMENTAL)");
 	SETCB ("anal.slow", "true", (RConfigCallback)&cb_anal_slow, "uses emulation and deeper analysis for better results");
+	SETPREF ("anal.emu", "false", "run aaef after analysis (EXPERIMENTAL)");
 	SETCB ("anal.noret", "true", (RConfigCallback)&cb_anal_noret, "propagate noreturn attributes (EXPERIMENTAL)");
 	SETCB ("anal.limits", "false", (RConfigCallback)&cb_anal_limits, "restrict analysis to address range [anal.from:anal.to]");
 	SETICB ("anal.from", -1, (RConfigCallback)&cb_anal_from, "lower limit on the address range for analysis");
@@ -3558,9 +3513,6 @@ R_API int r_core_config_init(RCore *core) {
 	n = NODECB ("arch.endian", R_SYS_ENDIAN? "big": "little", &cb_archendian);
 	SETDESC (n, "set arch endianness");
 	SETOPTIONS (n, "big", "little", "bigswap", "littleswap", NULL);
-	n = NODECB ("arch.arch", "null", &cb_archarch);
-	SETDESC (n, "select the architecture to use");
-	r_config_set_getter (cfg, "arch.arch", (RConfigCallback)cb_archarch_getter);
 	// SETCB ("arch.autoselect", "false", &cb_archautoselect, "automagically select matching decoder on arch related config changes (has no effect atm)");
 	SETICB ("asm.lines.maxref", 0, &cb_analmaxrefs, "maximum number of reflines to be analyzed and displayed in asm.lines with pd");
 
@@ -3614,7 +3566,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETBPREF ("dbg.glibc.demangle", "false", "demangle linked-lists pointers introduced in glibc 2.32");
 	SETBPREF ("esil.prestep", "true", "step before esil evaluation in `de` commands");
 	SETI ("esil.maxsteps", 0, "If !=0 defines the maximum amount of steps to perform on aesu/aec/..");
-	SETPREF ("esil.fillstack", "", "initialize ESIL stack with (random, debrujn, sequence, zeros, ...)");
+	SETPREF ("esil.fillstack", "", "initialize ESIL stack with (random, debruijn, sequence, zeros, ...)");
 	SETICB ("esil.verbose", 0, &cb_esilverbose, "show ESIL verbose level (0, 1, 2)");
 	SETICB ("esil.gotolimit", core->anal->esil_goto_limit, &cb_gotolimit, "maximum number of gotos per ESIL expression");
 	SETICB ("esil.stack.depth", 256, &cb_esilstackdepth, "number of elements that can be pushed on the esilstack");
@@ -3945,6 +3897,9 @@ R_API int r_core_config_init(RCore *core) {
 		SETPREF ("dir.plugins", path, "path to plugin files to be loaded at startup");
 		free (path);
 	}
+#if R2_USE_NEW_ABI
+	SETCB ("dir.source.base", "", &cb_dirsrc_base, "path to trim out from the one in dwarf");
+#endif
 	SETCB ("dir.source", "", &cb_dirsrc, "path to find source files");
 	SETPREF ("dir.types", "/usr/include", "default colon-separated list of paths to find C headers to cparse types");
 	SETPREF ("dir.libs", "", "specify path to find libraries to load when bin.libs=true");
@@ -4039,6 +3994,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETCB ("dbg.trace.continue", "true", &cb_dbg_trace_continue, "trace every instruction between the initial PC position and the PC position at the end of continue's execution");
 	SETBPREF ("dbg.trace.inrange", "false", "while tracing, avoid following calls outside specified range");
 	SETBPREF ("dbg.trace.libs", "true", "trace library code too");
+	SETBPREF ("dbg.trace.eval", "true", "evaluate instructions when tracing (analtp workaround)");
 	SETCB ("dbg.trace", "false", &cb_trace, "trace program execution (see asm.trace)");
 	SETICB ("dbg.trace.tag", 0, &cb_tracetag, "trace tag");
 	/* debug */
@@ -4363,7 +4319,7 @@ R_API int r_core_config_init(RCore *core) {
 
 	/* search */
 	SETCB ("search.contiguous", "true", &cb_contiguous, "accept contiguous/adjacent search hits");
-	SETBPREF ("search.verbose", "true", "make the output of search commands verbose");
+	SETBPREF ("search.verbose", "false", "make the output of search commands verbose");
 	SETICB ("search.align", 0, &cb_searchalign, "only catch aligned search hits");
 	SETI ("search.chunk", 0, "chunk size for /+ (default size is asm.bits/8");
 	SETI ("search.esilcombo", 8, "stop search after N consecutive hits");

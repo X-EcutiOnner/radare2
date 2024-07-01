@@ -1,9 +1,5 @@
-/* radare - LGPL - Copyright 2012-2023 - pancake, Fedor Sakharov */
+/* radare - LGPL - Copyright 2012-2024 - pancake, Fedor Sakharov */
 
-#include <errno.h>
-
-#include <r_bin.h>
-#include <r_bin_dwarf.h>
 #include <r_core.h>
 
 #define READ8(buf)                                                \
@@ -995,12 +991,12 @@ static inline void add_sdb_addrline(Sdb *s, ut64 addr, const char *file, ut64 li
 	case '*':
 #if R2_590
 		/// XXX CL must take filename as last argument to support spaces imho
-		print ("\"\"CL %s|%d|%d 0x%08"PFMT64x"\n", p, (int)line, (int)column, addr);
+		print ("'CL %s|%d|%d 0x%08"PFMT64x"\n", p, (int)line, (int)column, addr);
 #else
 		if (column) {
-			print ("\"\"CL %s:%d:%d 0x%08"PFMT64x"\n", p, (int)line, (int)column, addr);
+			print ("'CL %s:%d:%d 0x%08"PFMT64x"\n", p, (int)line, (int)column, addr);
 		} else if (line > 0) {
-			print ("\"\"CL %s:%d 0x%08"PFMT64x"\n", p, (int)line, addr);
+			print ("'CL %s:%d 0x%08"PFMT64x"\n", p, (int)line, addr);
 		}
 #endif
 		break;
@@ -1028,26 +1024,23 @@ static inline void add_sdb_addrline(Sdb *s, ut64 addr, const char *file, ut64 li
 static const ut8 *parse_ext_opcode(RBin *bin, const ut8 *obuf, size_t len, const RBinDwarfLineHeader *hdr, RBinDwarfSMRegisters *regs, int mode) {
 	r_return_val_if_fail (bin && bin->cur && obuf && hdr && regs, NULL);
 
-	bool be = r_bin_is_big_endian (bin);
+	const bool be = r_bin_is_big_endian (bin);
 	PrintfCallback print = bin->cb_printf;
-	const ut8 *buf;
-	const ut8 *buf_end;
-	ut8 opcode;
 	ut64 addr;
-	buf = obuf;
+	const ut8 *buf = obuf;
 	st64 op_len;
 	RBinFile *binfile = bin->cur;
 	RBinObject *o = binfile->bo;
 	ut32 addr_size = o && o->info && o->info->bits ? o->info->bits / 8 : 4;
 	const char *filename;
 
-	buf_end = buf + len;
+	const ut8 *buf_end = buf + len;
 	buf = r_leb128 (buf, len, &op_len);
 	if (buf >= buf_end) {
 		return NULL;
 	}
 
-	opcode = *buf++;
+	ut8 opcode = *buf++;
 
 	if (mode == R_MODE_PRINT) {
 		print ("  Extended opcode %d: ", opcode);
@@ -1544,25 +1537,19 @@ static bool init_abbrev_decl(RBinDwarfAbbrevDecl *ad) {
 	return false;
 }
 
-static int expand_abbrev_decl(RBinDwarfAbbrevDecl *ad) {
+static void expand_abbrev_decl(RBinDwarfAbbrevDecl *ad) {
 	if (!ad || !ad->capacity || ad->capacity != ad->count) {
-		return -EINVAL;
+		return;
 	}
-
 	RBinDwarfAttrDef *tmp = (RBinDwarfAttrDef *)realloc (ad->defs,
 		ad->capacity * 2 * sizeof (RBinDwarfAttrDef));
-
-	if (!tmp) {
-		return -ENOMEM;
+	if (tmp) {
+		// Set the area in the buffer past the length to 0
+		memset ((ut8 *)tmp + ad->capacity * sizeof (RBinDwarfAttrDef),
+			0, ad->capacity * sizeof (RBinDwarfAttrDef));
+		ad->defs = tmp;
+		ad->capacity *= 2;
 	}
-
-	// Set the area in the buffer past the length to 0
-	memset ((ut8 *)tmp + ad->capacity * sizeof (RBinDwarfAttrDef),
-		0, ad->capacity * sizeof (RBinDwarfAttrDef));
-	ad->defs = tmp;
-	ad->capacity *= 2;
-
-	return 0;
 }
 
 static bool init_debug_abbrev(RBinDwarfDebugAbbrev *da) {
@@ -1660,27 +1647,25 @@ static void free_attr_value(RBinDwarfAttrValue *val) {
 }
 
 static void free_die(RBinDwarfDie *die) {
-	size_t i;
-	if (!die) {
-		return;
+	if (die) {
+		size_t i;
+		for (i = 0; i < die->count; i++) {
+			free_attr_value (&die->attr_values[i]);
+		}
+		R_FREE (die->attr_values);
 	}
-	for (i = 0; i < die->count; i++) {
-		free_attr_value (&die->attr_values[i]);
-	}
-	R_FREE (die->attr_values);
 }
 
 static void free_comp_unit(RBinDwarfCompUnit *cu) {
-	size_t i;
-	if (!cu) {
-		return;
-	}
-	for (i = 0; i < cu->count; i++) {
-		if (cu->dies) {
-			free_die (&cu->dies[i]);
+	if (cu) {
+		size_t i;
+		for (i = 0; i < cu->count; i++) {
+			if (cu->dies) {
+				free_die (&cu->dies[i]);
+			}
 		}
+		R_FREE (cu->dies);
 	}
-	R_FREE (cu->dies);
 }
 
 R_API void r_bin_dwarf_free_debug_info(RBinDwarfDebugInfo *inf) {

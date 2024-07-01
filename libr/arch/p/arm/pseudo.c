@@ -1,8 +1,5 @@
-/* radare - LGPL - Copyright 2015-2022 - pancake */
+/* radare - LGPL - Copyright 2015-2024 - pancake */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <r_lib.h>
 #include <r_util.h>
 #include <r_flag.h>
@@ -24,6 +21,9 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ 3, "add", "# = # + #", { 1, 2, 3 } },
 		{ 2, "add", "# += #", { 1, 2 } },
 		{ 2, "adds", "# += #", { 1, 2 } },
+		{ 4, "madd", "# = (# * #) + #", { 1, 2, 3, 4 } },
+		{ 4, "msub", "# = (# * #) - #", { 1, 2, 3, 4 } },
+		{ 3, "mneg ", "# = -(# * #)", { 1, 2, 3 } },
 		{ 3, "adds", "# = # + #", { 1, 2, 3 } },
 		{ 3, "addw", "# = # + #", { 1, 2, 3 } },
 		{ 3, "add.w", "# = # + #", { 1, 2, 3 } },
@@ -37,25 +37,33 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ 0, "asrs", "# = # >> #", { 1, 2, 3 } },
 		{ 0, "asr", "# = # >> #", { 1, 2, 3 } },
 		{ 0, "b", "goto #", { 1 } },
-		{ 0, "cbz", "if !# goto #", { 1, 2 } },
-		{ 0, "cbnz", "if # goto #", { 1, 2 } },
+		{ 0, "cbz", "if (!#) goto #", { 1, 2 } },
+		{ 0, "cbnz", "if (#) goto #", { 1, 2 } },
 		{ 0, "b.w", "goto #", { 1 } },
-		{ 0, "b.gt", "goto ifgt #", { 1 } },
-		{ 0, "b.le", "goto ifle #", { 1 } },
+		{ 0, "b.gt", "if (a > b) goto #", { 1 } },
+		{ 0, "b.le", "if (a <= b) goto #", { 1 } },
+		{ 0, "b.lt", "if (a < b) goto #", { 1 } },
+		{ 0, "b.ge", "if (a >= b) goto #", { 1 } },
 		{ 0, "beq lr", "ifeq ret", {0} },
 		{ 0, "beq", "je #", { 1 } },
 		{ 0, "call", "# ()", { 1 } },
 		{ 0, "bl", "# ()", { 1 } },
 		{ 0, "blx", "# ()", { 1 } },
 		{ 0, "bx lr", "ret", {0} },
+		{ 1, "br", "switch #", { 1 } },
 		{ 0, "bxeq", "je #", { 1 } },
 		{ 0, "b.eq", "if (eq) goto #", { 1 } },
 		{ 0, "b.ne", "if (eq) goto #", { 1 } },
+		{ 0, "b.hi", "goto ifgt #", { 1 } },
+		{ 0, "b.lo", "goto iflt #", { 1 } },
 		{ 0, "cmf", "if (# == #)", { 1, 2 } },
 		{ 0, "cmn", "if (# != #)", { 1, 2 } },
-		{ 0, "cmp", "if (# == #)", { 1, 2 } },
-		{ 0, "fcmp", "if (# == #)", { 1, 2 } },
-		{ 0, "tst", "if ((# & #) == 0)", { 1, 2 } },
+		{ 0, "cmp", "(a, b) = compare (#, #)", { 1, 2 } },
+		{ 0, "fcmp", "(a, b) = compare (#, #)", { 1, 2 } },
+		{ 0, "tst", "(a, b) = compare (#, #)", { 1, 2 } },
+		// { 0, "cmp", "if (# == #)", { 1, 2 } },
+		// { 0, "fcmp", "if (# == #)", { 1, 2 } },
+		//{ 0, "tst", "if ((# & #) == 0)", { 1, 2 } },
 		{ 4, "csel", "# = (#)? # : #", { 1, 4, 2, 3 } },
 		{ 2, "cset", "# = (#)? 1 : 0", { 1, 2 } },
 		{ 0, "dvf", "# = # / #", { 1, 2, 3 } },
@@ -71,11 +79,13 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ 2, "ldr", "# = #", { 1, 2 } },
 		{ 2, "ldrh", "# = (word) #", { 1, 2 } },
 		{ 3, "ldrh", "# = (word) # + #", { 1, 2, 3 } },
+		{ 3, "ldruh", "# = (uword) # + #", { 1, 2, 3 } },
 		{ 2, "ldrb", "# = (byte) #", { 1, 2 } },
 		{ 3, "ldrb", "# = (byte) # + #", { 1, 2, 3 } },
 		{ 2, "ldrsb", "# = (byte) #", { 1, 2 } },
 		{ 2, "ldr.w", "# = #", { 1, 2 } },
 		{ 2, "ldrsw", "# = #", { 1, 2 } },
+		{ 4, "ldrsw", "# = # + # #", { 1, 2, 3, 4 } },
 		{ 3, "ldr", "# = # + #", { 1, 2, 3 } },
 		{ 3, "ldrb", "# = (byte) # + #", { 1, 2, 3 } },
 		{ 3, "ldrsb", "# = (byte) # + #", { 1, 2, 3 } },
@@ -85,10 +95,10 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ 0, "fmov", "# = #", { 1, 2 } },
 		{ 0, "mvn", "# = ~#", { 1, 2 } },
 		{ 0, "movz", "# = #", { 1, 2 } },
-		{ 4, "movk", "# = # # #", { 1, 2, 3, 4 } },
-		{ 0, "movk", "# = #", { 1, 2 } },
+		// { 4, "movk", "# = # # #", { 1, 2, 3, 4 } },
+		{ 3, "movk", "# = # #", { 1, 2, 3 } },
 		{ 0, "movn", "# = ~#", { 1, 2 } },
-		{ 0, "neg", "# = !#", { 1, 2 } },
+		{ 0, "neg", "# = -#", { 1, 2 } },
 		{ 0, "sxtw", "# = #", { 1, 2 } },
 		{ 0, "stur", "# # = #", { 2, 3, 1 } },
 		{ 4, "stp", "# + # = (#, 2)", { 3, 4, 1 } },
@@ -275,6 +285,7 @@ static int parse(RParse *p, const char *data, char *str) {
 	}
 	char *s = strdup (str);
 	if (s) {
+		s = r_str_replace (s, "wzr", "0", 1);
 		s = r_str_replace (s, " lsl ", " << ", 1);
 		s = r_str_replace (s, " lsr ", " >> ", 1);
 		s = r_str_replace (s, "+ -", "- ", 1);

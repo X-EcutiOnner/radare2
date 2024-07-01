@@ -296,8 +296,9 @@ R_API bool r_anal_set_os(RAnal *anal, const char *os) {
 		return r_anal_set_triplet (anal, os, NULL, -1);
 	}
 	// char *ff = r_str_newf ("types-%s.sdb", os);
-	// char *dbpath = r_file_new (dir_prefix, r2_sdb_fcnsign, ff);
-	char *dbpath = r_str_newf ("%s/%s/types-%s.sdb", dir_prefix, R2_SDB_FCNSIGN, os);
+	// char *dbpath = r_file_new (dir_prefix, r2_sdb_fcnsign, ff, NULL);
+	char *dbpath = r_str_newf ("%s%s%s%stypes-%s.sdb",
+		dir_prefix, R_SYS_DIR, R2_SDB_FCNSIGN, R_SYS_DIR, os);
 	if (r_file_exists (dbpath)) {
 		sdb_concat_by_path (types, dbpath);
 	}
@@ -423,7 +424,7 @@ R_API R_DEPRECATE int r_anal_archinfo(RAnal *anal, int query) { // R2_590
 }
 
 R_API bool r_anal_is_aligned(RAnal *anal, const ut64 addr) {
-	const int align = r_anal_archinfo (anal, R_ANAL_ARCHINFO_ALIGN);
+	const int align = r_anal_archinfo (anal, R_ARCH_INFO_CODE_ALIGN);
 	return align <= 1 || !(addr % align);
 }
 
@@ -708,7 +709,7 @@ R_API bool r_anal_is_prelude(RAnal *anal, ut64 addr, const ut8 *data, int len) {
 		}
 	}
 	if (!data) {
-		const int maxis = r_anal_archinfo (anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+		const int maxis = r_anal_archinfo (anal, R_ARCH_INFO_MAXOP_SIZE);
 		owned = malloc (maxis);
 		if (!owned) {
 			return false;

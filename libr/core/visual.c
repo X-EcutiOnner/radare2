@@ -21,8 +21,8 @@ typedef struct {
 
 static const char *printfmtSingle[NPF] = {
 	"xc",  // HEXDUMP
-	"pd $r",  // ASSEMBLY
-	"pxw 64@r:SP;dr=;drcq;pd $r",  // DEBUGGER
+	"afs;pd $r",  // ASSEMBLY
+	"pxw 64@r:SP;dr=;drcq;afs;pd $r",  // DEBUGGER
 	"prc", // OVERVIEW
 	"psb", // PC//  copypasteable views
 };
@@ -36,13 +36,13 @@ static const char *printfmtColumns[NPF] = {
 };
 
 // to print the stack in the debugger view
-#define PRINT_HEX_FORMATS 11
+#define PRINT_HEX_FORMATS 13
 #define PRINT_3_FORMATS 2
 #define PRINT_4_FORMATS 9
 #define PRINT_5_FORMATS 7
 
 static const char *printHexFormats[PRINT_HEX_FORMATS] = {
-	"px", "pxa", "pxr", "prx", "pxb", "pxh", "pxw", "pxq", "pxu", "pxd", "pxr",
+	"px", "pxa", "pxr", "prcn", "prcb", "prx", "pxb", "pxh", "pxw", "pxq", "pxu", "pxd", "pxr",
 };
 static const char *print3Formats[PRINT_3_FORMATS] = { //  not used at all. its handled by the pd format
 	"pxw 64@r:SP;dr=;drcq;pd $r", // DEBUGGER
@@ -130,6 +130,7 @@ static void setcursor(RCore *core, bool cur) {
 	core->print->col = core->print->cur_enabled? 1: 0;
 }
 
+// R2_600 make this function static and disMode must be taken from core->visual.disMode instead of an argument
 R_API void r_core_visual_applyDisMode(RCore *core, int disMode) {
 	core->visual.currentFormat = R_ABS (disMode) % 5;
 	switch (core->visual.currentFormat) {
@@ -484,7 +485,7 @@ R_API bool r_core_visual_hud(RCore *core) {
 	r_cons_context ()->color_mode = use_color;
 
 	r_core_visual_showcursor (core, true);
-	if (c && *c && r_file_exists (c)) {
+	if (R_STR_ISNOTEMPTY (c) && r_file_exists (c)) {
 		res = r_cons_hud_file (c);
 	}
 	if (!res && homehud) {
@@ -1174,8 +1175,8 @@ static ut64 prevop_addr(RCore *core, ut64 addr) {
 	ut64 target, base;
 	RAnalOp op;
 	int len, ret, i;
-	const int minop = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
-	const int maxop = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+	const int minop = r_anal_archinfo (core->anal, R_ARCH_INFO_MINOP_SIZE);
+	const int maxop = r_anal_archinfo (core->anal, R_ARCH_INFO_MAXOP_SIZE);
 
 	if (minop == maxop) {
 		if (minop == -1) {
@@ -1987,8 +1988,8 @@ static void cursor_ocur(RCore *core, bool use_ocur) {
 }
 
 static ut64 insoff(RCore *core, int delta) {
-	int minop = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MIN_OP_SIZE);
-	int maxop = r_anal_archinfo (core->anal, R_ANAL_ARCHINFO_MAX_OP_SIZE);
+	int minop = r_anal_archinfo (core->anal, R_ARCH_INFO_MINOP_SIZE);
+	int maxop = r_anal_archinfo (core->anal, R_ARCH_INFO_MAXOP_SIZE);
 	ut64 addr = core->offset + delta; // should be core->print->cur
 	RAnalBlock *bb = r_anal_bb_from_offset (core->anal, addr - minop);
 	if (bb) {
@@ -2190,7 +2191,9 @@ static void cursor_prevrow(RCore *core, bool use_ocur) {
 			} else {
 				RAnalOp op;
 				prev_roff = 0;
+				r_asm_op_init (&op);
 				r_core_seek (core, prev_addr, true);
+				r_asm_set_pc (core->rasm, prev_addr);
 				prev_sz = r_asm_disassemble (core->rasm, &op,
 					core->block, 32);
 				r_asm_op_fini (&op);
@@ -2205,7 +2208,7 @@ static void cursor_prevrow(RCore *core, bool use_ocur) {
 				p->cur--;
 			}
 		} else {
-			p->cur = prev_roff + delta; //res;
+			p->cur = prev_roff + delta; // res;
 		}
 	} else {
 		p->cur -= p->cols;
@@ -2293,6 +2296,65 @@ static bool fix_cursor(RCore *core) {
 		}
 	}
 	return res;
+}
+
+static void visual_windows(RCore *core) {
+	// TODO add more formats
+	// hud for all modes from visual
+	//int pidx = core->visual.printidx;
+	//int mode = core->visual.hexMode; // MODE_PX
+	//int mode = core->visual.disMode; // MODE_DB/PD
+	//int mode = core->visual.currentFormat; // MODE_OV / CD
+	RList *pmodes = r_list_newf (free);
+	r_list_append (pmodes, strdup ("0:0 standard hexdump"));
+	r_list_append (pmodes, strdup ("0:1 hexdump with flag names and colors"));
+	r_list_append (pmodes, strdup ("0:2 pxr recursive hexdump regsize word"));
+	r_list_append (pmodes, strdup ("0:5 hexdump with st32"));
+	r_list_append (pmodes, strdup ("0:7 hexdump with ut16"));
+	r_list_append (pmodes, strdup ("0:8 hexdump with ut32"));
+	r_list_append (pmodes, strdup ("0:6 bit viewer at byte level hexdump"));
+	r_list_append (pmodes, strdup ("1:0 standard disassembly view"));
+	r_list_append (pmodes, strdup ("1:2 disassembly with esil expressions"));
+	r_list_append (pmodes, strdup ("1:2 pseudo disassembly"));
+	r_list_append (pmodes, strdup ("2:0 standard debugger"));
+	r_list_append (pmodes, strdup ("3:0 raw byte image pixel view"));
+	r_list_append (pmodes, strdup ("3:5 entropy bars"));
+	r_list_append (pmodes, strdup ("4:0 code dump"));
+	r_list_append (pmodes, strdup ("4:1 assembly code"));
+	r_list_append (pmodes, strdup ("4:2 hex bytes"));
+	char *res = r_cons_hud (pmodes, NULL);
+	if (R_STR_ISNOTEMPTY (res)) {
+		int a, b;
+		sscanf (res, "%d:%d", &a, &b);
+		core->visual.printidx = a;
+		switch (core->visual.printidx) {
+		case R_CORE_VISUAL_MODE_PD:
+		case R_CORE_VISUAL_MODE_DB:
+			core->visual.disMode = b;
+			r_core_visual_applyDisMode (core, core->visual.disMode);
+			break;
+		case R_CORE_VISUAL_MODE_PX:
+			core->visual.hexMode = b;
+			r_core_visual_applyHexMode (core, core->visual.hexMode);
+			core->visual.currentFormat = b;
+			printfmtSingle[0] = printHexFormats[R_ABS (core->visual.hexMode) % PRINT_HEX_FORMATS];
+			break;
+		case R_CORE_VISUAL_MODE_OV:
+			// core->visual.hexMode = b;
+			core->visual.current4format = b;
+			core->visual.currentFormat = b;
+			break;
+		case R_CORE_VISUAL_MODE_CD:
+			// core->visual.hexMode = b;
+			core->visual.current5format = b;
+		//	core->visual.currentFormat = b;
+		core->visual.currentFormat = R_ABS (core->visual.current5format) % PRINT_5_FORMATS;
+		printfmtSingle[4] = print5Formats[core->visual.currentFormat];
+			break;
+		}
+	}
+	r_list_free (pmodes);
+	free (res);
 }
 
 static bool insert_mode_enabled(RCore *core) {
@@ -2472,8 +2534,8 @@ R_API void r_core_visual_browse(RCore *core, const char *input) {
 		"# Browse stuff:\n"
 		" _  hud mode (V_)\n"
 		" 1  bit editor (vd1)\n"
-		" b  blocks\n"
 		" a  anal classes\n"
+		" b  blocks\n"
 		" c  classes\n"
 		" C  comments\n"
 		" d  debug traces\n"
@@ -2495,6 +2557,7 @@ R_API void r_core_visual_browse(RCore *core, const char *input) {
 		" t  types\n"
 		" T  themes\n"
 		" v  vars\n"
+		" w  window panels\n"
 		" x  xrefs\n"
 		" X  refs\n"
 		" z  browse function zignatures\n"
@@ -2547,6 +2610,9 @@ R_API void r_core_visual_browse(RCore *core, const char *input) {
 		case 'v': // "vbv"
 			r_core_visual_anal (core, "v");
 			break;
+		case 'w': // "vbw"
+			visual_windows (core);
+			return;
 		case 'e': // "vbe"
 			r_core_visual_config (core);
 			break;
@@ -3082,7 +3148,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 				} else {
 					r_cons_printf ("[t] ");
 				}
-				r_cons_flush();
+				r_cons_flush ();
 				r_cons_set_raw (true);
 				int ch = r_cons_readchar ();
 				if (isdigit (ch)) {
@@ -3487,7 +3553,9 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 						} else if (!strcmp (__core_visual_print_command (core), "prc")) {
 							cols = r_config_get_i (core->config, "hex.cols");
 						}
-						r_core_seek_delta (core, -cols);
+						if (cols != 0) {
+							r_core_seek_delta (core, -cols);
+						}
 					}
 				}
 			}
@@ -3967,14 +4035,11 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 		break;
 		case 'z':
 		{
-			RAnalFunction *fcn;
+			ut64 at = core->offset;
 			if (core->print->cur_enabled) {
-				fcn = r_anal_get_fcn_in (core->anal,
-					core->offset + core->print->cur, R_ANAL_FCN_TYPE_NULL);
-			} else {
-				fcn = r_anal_get_fcn_in (core->anal,
-					core->offset, R_ANAL_FCN_TYPE_NULL);
+				at += core->print->cur;
 			}
+			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, at, R_ANAL_FCN_TYPE_NULL);
 			if (fcn) {
 				fcn->folded = !fcn->folded;
 			} else {
@@ -4028,22 +4093,6 @@ static void visual_title(RCore *core, int color) {
 	int pc, hexcols = r_config_get_i (core->config, "hex.cols");
 	if (core->visual.autoblocksize) {
 		switch (core->visual.printidx) {
-#if 0
-		case R_CORE_VISUAL_MODE_PXR: // prc
-		case R_CORE_VISUAL_MODE_PRC: // prc
-			r_core_block_size (core, (int)(core->cons->rows * hexcols * 3.5));
-			break;
-		case R_CORE_VISUAL_MODE_PXa: // pxa
-		case R_CORE_VISUAL_MODE_PW: // XXX pw
-			r_core_block_size (core, (int)(core->cons->rows * hexcols));
-			break;
-		case R_CORE_VISUAL_MODE_PC: // XXX pc
-			r_core_block_size (core, (int)(core->cons->rows * hexcols * 4));
-			break;
-		case R_CORE_VISUAL_MODE_PXA: // pxA
-			r_core_block_size (core, hexcols * core->cons->rows * 8);
-			break;
-#endif
 		case R_CORE_VISUAL_MODE_PX: // x
 			if (core->visual.currentFormat == 3 || core->visual.currentFormat == 9 || core->visual.currentFormat == 5) { // prx
 				r_core_block_size (core, (int)(core->cons->rows * hexcols * 4));
@@ -4573,38 +4622,77 @@ static void visual_refresh_oneshot(RCore *core) {
 	r_core_task_enqueue_oneshot (&core->tasks, (RCoreTaskOneShot) visual_refresh, core);
 }
 
+#if R2_USE_NEW_ABI
+static int varcount(RCore *core, RAnalFunction *f) {
+	RAnalFcnVarsCache vars_cache;
+	if (!f) {
+		f = r_anal_get_function_at (core->anal, core->offset);
+		if (!f) {
+			return 0;
+		}
+	}
+	r_anal_function_vars_cache_init (core->anal, &vars_cache, f);
+	int len = r_list_length (vars_cache.rvars);
+	len += r_list_length (vars_cache.bvars);
+	len += r_list_length (vars_cache.svars);
+	return len;
+}
+#endif
+
 R_API void r_core_visual_disasm_up(RCore *core, int *cols) {
 	RAnalFunction *f = r_anal_get_fcn_in (core->anal, core->offset, R_ANAL_FCN_TYPE_NULL);
 	if (f && f->folded) {
-		*cols = core->offset - f->addr; // + f->size;
+		*cols = core->offset - f->addr;
 		if (*cols < 1) {
 			*cols = 4;
 		}
 	} else {
+#if R2_USE_NEW_ABI
+		if (f && core->offset == f->addr) {
+			if (core->skiplines > 0) {
+				core->skiplines--;
+				*cols = 0;
+			} else {
+				int delta = r_core_visual_prevopsz (core, core->offset);
+				*cols = delta;
+			}
+			return;
+		}
+		int delta = r_core_visual_prevopsz (core, core->offset);
+		if (f && core->offset - delta == f->addr) {
+			core->skiplines = varcount (core, f);
+			*cols = delta;
+			if (core->skiplines > 0) {
+				core->skiplines--;
+			}
+		} else {
+			*cols = delta;
+			// *cols = 0;
+		}
+#else
 		*cols = r_core_visual_prevopsz (core, core->offset);
+#endif
 	}
 }
 
 R_API void r_core_visual_disasm_down(RCore *core, RAnalOp *op, int *cols) {
 	int midflags = r_config_get_i (core->config, "asm.flags.middle");
 	const bool midbb = r_config_get_i (core->config, "asm.bbmiddle");
-	RAnalFunction *f = NULL;
-	f = r_anal_get_fcn_in (core->anal, core->offset, 0);
+	RAnalFunction *f = r_anal_get_fcn_in (core->anal, core->offset, 0);
+	ut64 orig = core->offset;
 	op->size = 1;
 	if (f && f->folded) {
 		*cols = core->offset - r_anal_function_max_addr (f);
 	} else {
 		r_asm_set_pc (core->rasm, core->offset);
-
 		int maxopsize = r_anal_archinfo (core->anal,
-			R_ANAL_ARCHINFO_MAX_OP_SIZE);
+			R_ARCH_INFO_MAXOP_SIZE);
 		size_t bufsize = maxopsize > -1? R_MAX (maxopsize, 32): 32;
 		ut8 *buf = calloc (bufsize, sizeof (ut8));
 		if (!buf) {
 			R_LOG_ERROR ("Cannot allocate %d byte(s)", (int)bufsize);
 			return;
 		};
-		ut64 orig = core->offset;
 		size_t bufpos = 0;
 		size_t cpysize = 0;
 		while (bufpos < bufsize) {
@@ -4636,9 +4724,24 @@ R_API void r_core_visual_disasm_down(RCore *core, RAnalOp *op, int *cols) {
 			}
 		}
 	}
+#if R2_USE_NEW_ABI
+	if (f && f->addr == orig) {
+		// skip line by line here
+		if (varcount (core, f) <= core->skiplines) {
+			*cols = op->size > 1 ? op->size : 1;
+			core->skiplines = 0;
+		} else {
+			core->skiplines ++;
+			*cols = 0;
+		}
+	} else if (*cols < 1) {
+		*cols = op->size > 1 ? op->size : 1;
+	}
+#else
 	if (*cols < 1) {
 		*cols = op->size > 1 ? op->size : 1;
 	}
+#endif
 }
 
 #ifdef R2__WINDOWS__

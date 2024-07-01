@@ -1,4 +1,4 @@
-project('radare2', 'c', license : 'LGPL3', meson_version : '>=0.50', version : '5.9.1')
+project('radare2', 'c', license : 'LGPL3', meson_version : '>=0.50', version : '5.9.3')
 
 py3_exe = import('python').find_installation('python3')
 gen_py = '@0@/libr/syscall/d/gen.py'.format(meson.current_source_dir())
@@ -329,6 +329,18 @@ else
   message('Not using libuv, thus using fallback server implementations')
 endif
 
+use_libsqsh = false
+if get_option('use_libsqsh')
+  libsqsh_dep = dependency('libsqsh', version: '>=1.4.0', required: false)
+  use_libsqsh = libsqsh_dep.found()
+  if not libsqsh_dep.found()
+    use_libsqsh = false
+    warning('use_libsqsh option was set to true, but libsqsh was not found.')
+  endif
+else
+  use_libsqsh = false
+endif
+
 has_debugger = get_option('debugger')
 have_ptrace = not ['haiku', 'windows', 'cygwin', 'sunos', 'aix'].contains(host_machine.system())
 can_ptrace_wrap = ['linux'].contains(host_machine.system())
@@ -360,6 +372,7 @@ userconf.set10('HAVE_LINUX_CAN_H', false)
 userconf.set10('DEBUGGER', has_debugger)
 userconf.set('ETCDIR', join_paths(r2_prefix, 'etc'))
 userconf.set('PREFIX', r2_prefix)
+userconf.set('BINDIR', join_paths(r2_prefix, 'bin'))
 if host_machine.system() == 'windows'
   userconf.set('LIBDIR', r2_libdir)
   userconf.set('INCLUDEDIR', r2_incdir)
@@ -386,6 +399,7 @@ userconf.set('PLUGINS', r2_plugins)
 userconf.set('EXTRAS', r2_extras)
 userconf.set('BINDINGS', r2_bindings)
 userconf.set('R2_BUILDSYSTEM', 'meson')
+userconf.set10('USE_SQSH', use_libsqsh)
 capstone_version = get_option('use_capstone_version')
 userconf.set10('USE_CS4', capstone_version == 'v4')
 userconf.set10('USE_CSNEXT', capstone_version == 'v6')
@@ -397,6 +411,7 @@ userconf.set10('HAVE_GPERF', get_option('sdb_cgen'))
 userconf.set10('WANT_DYLINK', use_dylink)
 userconf.set10('WANT_THREADS', get_option('want_threads'))
 userconf.set10('WANT_CAPSTONE', get_option('want_capstone'))
+userconf.set10('USE_NEW_ABI', get_option('use_new_abi'))
 userconf.set10('HAVE_PTRACE', have_ptrace)
 userconf.set10('WANT_DEBUGSTUFF', get_option('debugstuff'))
 userconf.set('R_CRITICAL_ENABLED', r2_critical_enabled)

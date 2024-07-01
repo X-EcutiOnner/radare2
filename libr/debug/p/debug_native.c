@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2023 - pancake */
+/* radare - LGPL - Copyright 2009-2024 - pancake */
 
 #include <r_userconf.h>
 #include <r_drx.h>
@@ -1003,12 +1003,11 @@ static int r_debug_native_map_dealloc(RDebug *dbg, ut64 addr, int size) {
 
 #if !R2__WINDOWS__ && !__APPLE__
 static void _map_free(RDebugMap *map) {
-	if (!map) {
-		return;
+	if (map) {
+		free (map->name);
+		free (map->file);
+		free (map);
 	}
-	free (map->name);
-	free (map->file);
-	free (map);
 }
 #endif
 
@@ -1654,6 +1653,14 @@ RDebugPlugin r_debug_plugin_native = {
 	.bits = R_SYS_BITS_32,
 	.arch = "x86",
 	.canstep = true,
+#elif __s390x__ || __s390__
+	.bits = R_SYS_BITS_64,
+	.arch = "s390",
+	.canstep = true,
+#elif __riscv || __riscv__ || __riscv64__
+	.bits = R_SYS_BITS_64,
+	.arch = "riscv",
+	.canstep = false,
 #elif __x86_64__
 	.bits = R_SYS_BITS_32 | R_SYS_BITS_64,
 	.arch = "x86",
