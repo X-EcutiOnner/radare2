@@ -10,6 +10,11 @@
 #include <sys/file.h>  /* for flock */
 #include <sys/stat.h>  /* for struct stat */
 #include <limits.h>
+#if __ANDROID__
+#define FLOCK(fd, op) 0
+#else
+#define FLOCK(fd, op) flock (fd, op)
+#endif
 #endif
 
 #define BS 1024
@@ -68,29 +73,22 @@ R_API bool r_file_mmap_resize(RMmap *m, ut64 newsize) {
 
 R_API int r_file_mmap_write(const char *file, ut64 addr, const ut8 *buf, int len) {
 #if R2__WINDOWS__
-	HANDLE fh = INVALID_HANDLE_VALUE;
 	DWORD written = 0;
-	LPTSTR file_ = NULL;
 	int ret = -1;
 
 	if (r_sandbox_enable (0)) {
 		return -1;
 	}
-	file_ = r_sys_conv_utf8_to_win (file);
-	fh = CreateFile (file_, GENERIC_READ|GENERIC_WRITE,
+	LPTSTR file_ = r_sys_conv_utf8_to_win (file);
+	HANDLE fh = CreateFile (file_, GENERIC_READ | GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE,
 		NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	if (fh == INVALID_HANDLE_VALUE) {
-		r_sys_perror ("r_file_mmap_write/CreateFile");
-		goto err_r_file_mmap_write;
+	if (fh != INVALID_HANDLE_VALUE) {
+		SetFilePointer (fh, addr, NULL, FILE_BEGIN);
+		if (WriteFile (fh, buf, (DWORD)len, &written, NULL)) {
+			ret = len;
+		}
 	}
-	SetFilePointer (fh, addr, NULL, FILE_BEGIN);
-	if (!WriteFile (fh, buf, (DWORD)len,  &written, NULL)) {
-		r_sys_perror ("r_file_mmap_write/WriteFile");
-		goto err_r_file_mmap_write;
-	}
-	ret = len;
-err_r_file_mmap_write:
 	free (file_);
 	if (fh != INVALID_HANDLE_VALUE) {
 		CloseHandle (fh);
@@ -109,7 +107,7 @@ err_r_file_mmap_write:
 	if ((st64)addr < 0) {
 		return -1;
 	}
-	ut8 *mmap_buf = mmap (NULL, mmlen * 2, PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)addr - rest);
+	ut8 *mmap_buf = mmap (NULL, mmlen * 2, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)addr - rest);
 	if (((int)(size_t)mmap_buf) == -1) {
 		return -1;
 	}
@@ -149,7 +147,7 @@ R_API int r_file_mmap_read(RMmap *m, ut64 addr, ut8 *buf, int len) {
 	/* Get file size */
 	LARGE_INTEGER filesize;
 	if (!GetFileSizeEx (m->fh, &filesize)) {
-		UnlockFileEx(m->fh, 0, lenLow, lenHigh, &ov);
+		UnlockFileEx (m->fh, 0, lenLow, lenHigh, &ov);
 		return -1;
 	}
 	ut64 limit = (ut64)filesize.QuadPart;
@@ -182,7 +180,7 @@ R_API int r_file_mmap_read(RMmap *m, ut64 addr, ut8 *buf, int len) {
 	off_t off = (off_t)(addr - base);
 	/* Check bounds via fstat */
 	struct stat st;
-	if (fstat(m->fd, &st) != 0) {
+	if (fstat (m->fd, &st) != 0) {
 		return -1;
 	}
 	ut64 limit2 = (ut64)st.st_size;
@@ -210,39 +208,37 @@ R_API int r_file_mmap_read(RMmap *m, ut64 addr, ut8 *buf, int len) {
 		return -1;
 	}
 	/* Compute offset within mapping */
+	if (addr < m->base) {
+		return -1;
+	}
 	ut64 base = m->base;
-	if (addr < base) {
-		return -1;
-	}
 	off_t offset = (off_t)(addr - base);
-	/* Acquire shared lock for atomic fstat+memcpy */
-	if (flock (m->fd, LOCK_SH) != 0) {
-		return -1;
-	}
+	/* Try to acquire shared lock for atomic fstat+memcpy */
+	const bool flock_acquired = FLOCK (m->fd, LOCK_SH) == 0;
 	struct stat st;
 	if (fstat (m->fd, &st) != 0) {
-		flock (m->fd, LOCK_UN);
+		if (flock_acquired) {
+			FLOCK (m->fd, LOCK_UN);
+		}
 		return -1;
 	}
 	/* Bound check: do not read past file or mapping length */
-	ut64 limit = (ut64)st.st_size;
-	if (limit > m->len) {
-		limit = m->len;
-	}
-	{
-		ut64 offset64 = (ut64)offset;
-		ut64 readlen = len;
-		if (offset64 >= limit) {
-			flock (m->fd, LOCK_UN);
-			return 0;
-		}
+	ut64 limit = R_MIN (m->len, st.st_size);
+	ut64 offset64 = (ut64)offset;
+	ut64 readlen = len;
+	if (offset64 < limit) {
 		if (offset64 + readlen > limit) {
 			readlen = limit - offset64;
 		}
-		memcpy (buf, (const ut8 *)m->buf + offset64, (size_t)readlen);
-		flock (m->fd, LOCK_UN);
-		return (int)readlen;
+		const ut8 *p = (const ut8 *)m->buf + offset64;
+		memcpy (buf, p, (size_t)readlen);
+	} else {
+		readlen = 0;
 	}
+	if (flock_acquired) {
+		FLOCK (m->fd, LOCK_UN);
+	}
+	return (int)readlen;
 #else
 	return -1;
 #endif
@@ -250,14 +246,13 @@ R_API int r_file_mmap_read(RMmap *m, ut64 addr, ut8 *buf, int len) {
 
 R_API int r_file_slurp_mmap(const char *file, ut64 addr, ut8 *buf, int len) {
 #if R2__WINDOWS__
-	HANDLE fm = NULL, fh = INVALID_HANDLE_VALUE;
-	LPTSTR file_ = NULL;
+	HANDLE fm = NULL;
 	int ret = -1;
 	if (r_sandbox_enable (0)) {
 		return -1;
 	}
-	file_ = r_sys_conv_utf8_to_win (file);
-	fh = CreateFile (file_, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+	LPTSTR file_ = r_sys_conv_utf8_to_win (file);
+	HANDLE fh = CreateFile (file_, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
 	if (fh == INVALID_HANDLE_VALUE) {
 		r_sys_perror ("r_file_mmap_read/CreateFile");
 		goto err_r_file_mmap_read;
@@ -337,16 +332,12 @@ static bool r_file_mmap_windows(RMmap *m, const char *file) {
 		goto err_r_file_mmap_windows;
 	}
 	m->fm = CreateFileMapping (m->fh, NULL, PAGE_READONLY, 0, 0, NULL);
-		//m->rw?PAGE_READWRITE:PAGE_READONLY, 0, 0, NULL);
 	if (!m->fm) {
 		r_sys_perror ("CreateFileMapping");
 		goto err_r_file_mmap_windows;
 
 	}
-	m->buf = MapViewOfFile (m->fm,
-		// m->rw?(FILE_MAP_READ|FILE_MAP_WRITE):FILE_MAP_READ,
-		FILE_MAP_COPY,
-		UT32_HI (m->base), UT32_LO (m->base), 0);
+	m->buf = MapViewOfFile (m->fm, FILE_MAP_COPY, UT32_HI (m->base), UT32_LO (m->base), 0);
 	success = true;
 err_r_file_mmap_windows:
 	if (!success) {
@@ -372,7 +363,6 @@ static bool file_mmap_other(RMmap *m) {
 }
 #endif
 
-// XXX _arch is a very badname
 R_API bool r_file_mmap_fd(RMmap *mmap, const char *filename, int fd) {
 #if R2__WINDOWS__
 	(void)fd;
@@ -402,20 +392,20 @@ R_API RMmap *r_file_mmap(const char *file, bool rw, ut64 base) {
 	m->base = base;
 	m->rw = rw;
 	m->fd = fd;
-	m->len = fd != -1? lseek (fd, (off_t)0, SEEK_END) : 0;
 	m->filename = strdup (file);
-	if (fd != -1 && lseek (fd, 0, SEEK_SET) == -1) {
-		R_LOG_ERROR ("Failed to seek to beginning of file");
-	}
-
-	if (m->fd == -1) {
+	if (fd == -1) {
+		m->len = 0;
 		return m;
 	}
-
-	if (m->len == (off_t)-1) {
+	off_t ores = lseek (fd, (off_t)0, SEEK_END);
+	if (ores == (off_t)-1) {
 		close (fd);
 		R_FREE (m);
 		return NULL;
+	}
+	m->len = ores;
+	if (lseek (fd, 0, SEEK_SET) == (off_t)-1) {
+		R_LOG_ERROR ("Failed to seek to beginning of file");
 	}
 	bool res = false;
 #if R2__UNIX__
@@ -439,13 +429,9 @@ R_API ut64 r_file_mmap_size(RMmap *m) {
 	struct stat st;
 	if (fstat (m->fd, &st) == 0) {
 		m->len = st.st_size;
-		return m->len;
 	}
-	// XXX maybe unsafe
-	return m->len;
-#else
-	return m->len;
 #endif
+	return m->len;
 }
 
 R_API void r_file_mmap_free(RMmap *m) {
@@ -474,4 +460,3 @@ R_API void r_file_mmap_free(RMmap *m) {
 	close (m->fd);
 	free (m);
 }
-
